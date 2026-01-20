@@ -1,0 +1,25 @@
+OPENAI_API_KEY: your_openai_api_key_here
+OPENAI_MODEL: gpt-4-vision-preview
+MAX_IMAGE_SIZE: 4194304
+
+image_analysis:
+  confidence_threshold: 0.7
+  max_detections: 10
+
+box_sizes:
+  small:
+    dimensions: [30, 30, 30]  # cm
+    weight_capacity: 10  # kg
+  medium:
+    dimensions: [45, 45, 45]
+    weight_capacity: 20
+  large:
+    dimensions: [60, 60, 60]
+    weight_capacity: 30
+  xlarge:
+    dimensions: [75, 75, 75]
+    weight_capacity: 40
+
+space_estimation:
+  padding_factor: 1.2
+  stacking_factor: 0.85
