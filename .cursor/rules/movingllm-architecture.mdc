@@ -1,0 +1,15 @@
+---
+description: MovingLLM 的架构边界、配置和改动顺序
+alwaysApply: true
+---
+
+# MovingLLM 研发约束
+
+行为以 `docs/design.md` 为准，模块边界以 `docs/architecture.md` 为准。改公式或接口前先改设计说明。
+
+- 视觉模型只产出家具清单。体积、纸箱、车辆、费用由规划代码计算。
+- 新供应商实现 `MovingLLMProvider`。Agent 不直接调用模型 SDK。
+- 业务系数放在 `config/config.yaml`。密钥只放环境变量，不写入仓库。
+- 每件家具只进入车厢一次：散装算外包络，装箱只算纸箱外体积。
+- 图像估算保持 `dimensions_confirmed=false`。确认后走 `plan_from_items` 或 `POST /recalculate`。
+- 改规划或解析时，补不访问网络的测试。
