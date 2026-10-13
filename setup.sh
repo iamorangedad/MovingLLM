@@ -39,8 +39,6 @@ else
     echo ".env文件已存在"
 fi
 
-# 创建必要的目录
-mkdir -p models
 mkdir -p examples
 
 echo ""
@@ -48,6 +46,7 @@ echo "安装完成!"
 echo ""
 echo "下一步:"
 echo "1. 编辑 .env 文件，填入 OPENAI_API_KEY"
-echo "2. 运行示例: python3 examples/example_usage.py"
-echo "3. 或者启动API服务器: python3 api_server.py"
+echo "2. 运行测试: python3 -m pytest"
+echo "3. 分析图片: python3 main.py <图片路径>"
+echo "4. 或启动 API: python3 api_server.py"
 echo ""
