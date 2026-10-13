@@ -1,115 +1,117 @@
-from typing import List, Dict, Any
-from src.models import FurnitureItem, SpaceEstimation, Dimensions
-from src.config import settings
+import math
+
+from src.cargo import LOAD_FIRST, fits_door, rides_loose
+from src.config import get_settings
+from src.models import BoxRequirement, FurnitureItem, SpaceEstimation
 
 
 class SpaceEstimator:
-    def __init__(self):
-        self.padding_factor = settings.padding_factor
-        self.stacking_factor = settings.stacking_factor
+    def __init__(self, settings=None):
+        self.settings = settings or get_settings()
 
-    def estimate_space(self, furniture_items: List[FurnitureItem]) -> SpaceEstimation:
-        total_volume = 0
-        packable_items = []
-
-        for item in furniture_items:
-            item_volume = item.dimensions.volume() * item.quantity
-            total_volume += item_volume
-
-            if item.disassemble or item.dimensions.length < 150:
-                packable_items.append(item)
-
-        packed_volume = (
-            sum(item.dimensions.volume() * item.quantity for item in packable_items)
-            * self.padding_factor
+    def estimate_space(
+        self,
+        furniture_items: list[FurnitureItem],
+        box_requirements: list[BoxRequirement],
+    ) -> SpaceEstimation:
+        packing = self.settings.packing
+        total_volume = sum(
+            item.dimensions.volume() * item.quantity for item in furniture_items
         )
-
-        unpacked_volume = sum(
-            item.dimensions.volume() * item.quantity
+        loose_items = [
+            item
             for item in furniture_items
-            if not item.disassemble
+            if rides_loose(item, self.settings.box_sizes)
+        ]
+        loose_volume = sum(
+            item.dimensions.volume() * item.quantity * packing.loose_padding_factor
+            for item in loose_items
         )
+        box_volume = sum(
+            req.dimensions.volume() * req.count for req in box_requirements
+        )
+        effective = loose_volume + box_volume * packing.stacking_factor
 
-        effective_volume = (packed_volume * self.stacking_factor) + unpacked_volume
-
-        truck_size = self._determine_truck_size(effective_volume)
-
-        layout_suggestions = self._generate_layout_suggestions(furniture_items)
-
-        efficiency = (effective_volume / (effective_volume * 1.3)) * 100
+        truck, trips, blocked = self._select_truck(loose_items, effective)
+        hired_m3 = trips * truck.capacity_m3
+        effective_m3 = effective / 1_000_000
+        efficiency = round(effective_m3 / hired_m3 * 100, 2) if hired_m3 else 0
 
         return SpaceEstimation(
-            total_volume=total_volume,
-            packed_volume=effective_volume,
-            truck_size_required=truck_size,
-            layout_suggestions=layout_suggestions,
-            packing_efficiency=round(efficiency, 2),
+            total_volume_cm3=total_volume,
+            loose_volume_cm3=loose_volume,
+            box_volume_cm3=box_volume,
+            effective_volume_cm3=effective,
+            truck_name=truck.name,
+            truck_capacity_m3=truck.capacity_m3,
+            trips=trips,
+            packing_efficiency=efficiency,
+            layout_suggestions=self._layout_suggestions(
+                loose_items, trips, blocked
+            ),
+            items_exceed_all_doors=blocked,
         )
 
-    def _determine_truck_size(self, volume: float) -> str:
-        volume_m3 = volume / 1000000
+    def _select_truck(self, loose_items: list[FurnitureItem], effective_cm3: float):
+        trucks = self.settings.trucks
+        accessible = [
+            truck
+            for truck in trucks
+            if all(fits_door(item.dimensions, truck) for item in loose_items)
+        ]
+        blocked: list[str] = []
+        pool = accessible
+        if not pool:
+            pool = trucks
+            blocked = [
+                item.name
+                for item in loose_items
+                if not any(fits_door(item.dimensions, truck) for truck in trucks)
+            ]
 
-        if volume_m3 < 2:
-            return "小型厢式车 (约3m³)"
-        elif volume_m3 < 5:
-            return "中型厢式车 (约5-8m³)"
-        elif volume_m3 < 10:
-            return "大型厢式车 (约10-15m³)"
-        elif volume_m3 < 20:
-            return "小型货车 (约15-20m³)"
-        else:
-            return "大型货车 (20m³以上)"
+        effective_m3 = effective_cm3 / 1_000_000
+        fitting = [truck for truck in pool if truck.capacity_m3 >= effective_m3]
+        if fitting:
+            truck = min(fitting, key=lambda item: item.capacity_m3)
+            return truck, 1, blocked
 
-    def _generate_layout_suggestions(
-        self, furniture_items: List[FurnitureItem]
-    ) -> List[str]:
-        suggestions = []
+        truck = max(pool, key=lambda item: item.capacity_m3)
+        trips = max(1, math.ceil(effective_m3 / truck.capacity_m3))
+        return truck, trips, blocked
 
-        has_large_items = any(
-            item.dimensions.length > 200 or item.dimensions.height > 200
-            for item in furniture_items
-        )
-
-        has_furniture = any(
-            item.furniture_type.name in ["SOFA", "BED", "WARDROBE"]
-            for item in furniture_items
-        )
-
-        suggestions.append("先将大型家具（床、沙发、衣柜等）放置在车辆后部")
-
-        if has_furniture:
-            suggestions.append("使用家具包裹膜保护表面")
-
-        if has_large_items:
-            suggestions.append("大型物品建议垂直放置以节省空间")
-
-        disassemblable = [item for item in furniture_items if item.disassemble]
-        if disassemblable:
-            suggestions.append(f"建议拆卸 {len(disassemblable)} 件可拆卸家具以节省空间")
-
-        fragile_items = [item for item in furniture_items if item.fragile]
-        if fragile_items:
-            suggestions.append("易碎物品应放置在顶部并固定")
-
-        suggestions.append("使用绑带固定家具，防止运输中滑动")
-        suggestions.append("留出通道便于装卸")
-
-        return suggestions
-
-    def calculate_loading_order(
-        self, furniture_items: List[FurnitureItem]
-    ) -> List[FurnitureItem]:
-        def sort_key(item):
-            priority = 0
-            if item.furniture_type.name in ["WARDROBE", "SOFA", "BED"]:
-                priority = -1
-            elif item.furniture_type.name in ["TABLE", "DESK"]:
-                priority = 0
+    def loading_order(self, furniture_items: list[FurnitureItem]) -> list[str]:
+        def sort_key(item: FurnitureItem):
+            loose = rides_loose(item, self.settings.box_sizes)
+            if loose and item.furniture_type in LOAD_FIRST:
+                group = 0
+            elif loose:
+                group = 1
             else:
-                priority = 1
+                group = 2
+            return (group, -item.dimensions.volume() * item.quantity)
 
-            size_score = item.dimensions.volume()
+        ordered = sorted(furniture_items, key=sort_key)
+        return [
+            f"{item.name}（{item.furniture_type.value}） x{item.quantity}"
+            for item in ordered
+        ]
 
-            return (priority, -size_score)
-
-        return sorted(furniture_items, key=sort_key)
+    @staticmethod
+    def _layout_suggestions(
+        loose_items: list[FurnitureItem], trips: int, blocked: list[str]
+    ) -> list[str]:
+        suggestions = []
+        if any(item.furniture_type in LOAD_FIRST for item in loose_items):
+            suggestions.append("衣柜、沙发、床先装入车厢后部，再用绑带固定")
+        elif loose_items:
+            suggestions.append("散装家具贴车厢壁放置，并用绑带固定")
+        if any(item.fragile for item in loose_items):
+            suggestions.append("易碎的散装物品放在上层，避免被重物压住")
+        if trips > 1:
+            suggestions.append(f"一车装不下，按当前车型需要 {trips} 趟")
+        if blocked:
+            names = "、".join(blocked)
+            suggestions.append(f"{names} 超过全部车型的车厢门或最长边，需要另选车辆")
+        if not suggestions:
+            suggestions.append("物品均可装箱，纸箱重的在下、轻的在上")
+        return suggestions
