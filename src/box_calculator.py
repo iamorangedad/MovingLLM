@@ -1,181 +1,148 @@
-from typing import List
-from src.models import FurnitureItem, BoxRequirement, BoxSize, Dimensions
-from src.config import settings
+import math
+from dataclasses import dataclass, field
+
+from src.cargo import DISASSEMBLED_BOX, fits_envelope, rides_loose
+from src.config import get_settings
+from src.models import BoxRequirement, BoxSize, FurnitureItem
+
+
+@dataclass
+class _Bin:
+    size: BoxSize
+    volume: float = 0
+    weight: float = 0
+    names: list[str] = field(default_factory=list)
 
 
 class BoxCalculator:
-    def __init__(self):
-        self.box_sizes = {
-            BoxSize.SMALL: {
-                "dimensions": Dimensions(30, 30, 30),
-                "weight_capacity": 10,
-            },
-            BoxSize.MEDIUM: {
-                "dimensions": Dimensions(45, 45, 45),
-                "weight_capacity": 20,
-            },
-            BoxSize.LARGE: {
-                "dimensions": Dimensions(60, 60, 60),
-                "weight_capacity": 30,
-            },
-            BoxSize.XLARGE: {
-                "dimensions": Dimensions(75, 75, 75),
-                "weight_capacity": 40,
-            },
-        }
+    def __init__(self, settings=None):
+        self.settings = settings or get_settings()
+        self.box_sizes = self.settings.box_sizes
+        self.fill_factor = self.settings.packing.box_fill_factor
 
     def calculate_box_requirements(
-        self, furniture_items: List[FurnitureItem]
-    ) -> List[BoxRequirement]:
-        requirements = {}
+        self, furniture_items: list[FurnitureItem]
+    ) -> list[BoxRequirement]:
+        counts = {size: 0 for size in BoxSize}
+        preset_labels: dict[BoxSize, list[str]] = {size: [] for size in BoxSize}
+        rigid_names: dict[BoxSize, list[str]] = {size: [] for size in BoxSize}
+        rigid: list[FurnitureItem] = []
 
         for item in furniture_items:
-            if not item.disassemble and item.dimensions.volume() > 300000:
+            if rides_loose(item, self.box_sizes):
                 continue
+            if item.disassemble:
+                size, count = self._disassembled_boxes(item)
+                if count:
+                    counts[size] += count
+                    preset_labels[size].append(f"{item.name} x{item.quantity}")
+            else:
+                rigid.append(item)
 
-            boxes_needed = self._estimate_boxes_for_item(item)
+        for packed in self._pack_rigid(rigid):
+            counts[packed.size] += 1
+            rigid_names[packed.size].extend(packed.names)
 
-            for size, count in boxes_needed.items():
-                if size not in requirements:
-                    requirements[size] = BoxRequirement(
+        requirements = []
+        for size in BoxSize:
+            if counts[size] <= 0:
+                continue
+            spec = self.box_sizes[size]
+            requirements.append(
+                BoxRequirement(
+                    size=size,
+                    dimensions=spec.dimensions,
+                    count=counts[size],
+                    weight_capacity=spec.weight_capacity,
+                    suggested_contents=preset_labels[size] + self._summarize(rigid_names[size]),
+                )
+            )
+        return requirements
+
+    def _disassembled_boxes(self, item: FurnitureItem) -> tuple[BoxSize, int]:
+        size = DISASSEMBLED_BOX[item.furniture_type]
+        spec = self.box_sizes[size]
+        usable = spec.dimensions.volume() * self.fill_factor
+        total_volume = item.dimensions.volume() * item.quantity
+        by_volume = math.ceil(total_volume / usable) if total_volume > 0 else 0
+        by_weight = 0
+        if item.weight is not None:
+            by_weight = math.ceil((item.weight * item.quantity) / spec.weight_capacity)
+        return size, max(by_volume, by_weight)
+
+    def _smallest_box(self, item: FurnitureItem) -> BoxSize:
+        for size in BoxSize:
+            spec = self.box_sizes[size]
+            weight_ok = item.weight is None or item.weight <= spec.weight_capacity
+            if fits_envelope(item.dimensions, spec.dimensions) and weight_ok:
+                return size
+        raise RuntimeError(f"{item.name} 应判定为散装，不应进入装箱")
+
+    def _pack_rigid(self, items: list[FurnitureItem]) -> list[_Bin]:
+        units: list[tuple[FurnitureItem, BoxSize]] = []
+        for item in items:
+            size = self._smallest_box(item)
+            units.extend((item, size) for _ in range(item.quantity))
+        units.sort(key=lambda pair: pair[0].dimensions.volume(), reverse=True)
+
+        bins: list[_Bin] = []
+        for item, size in units:
+            spec = self.box_sizes[size]
+            weight = item.weight or 0
+            placed = False
+            for packed in bins:
+                if packed.size != size or packed.volume == 0:
+                    continue
+                within_volume = (
+                    packed.volume + item.dimensions.volume()
+                    <= spec.dimensions.volume() * self.fill_factor
+                )
+                within_weight = packed.weight + weight <= spec.weight_capacity
+                if within_volume and within_weight:
+                    packed.volume += item.dimensions.volume()
+                    packed.weight += weight
+                    packed.names.append(item.name)
+                    placed = True
+                    break
+            if not placed:
+                bins.append(
+                    _Bin(
                         size=size,
-                        dimensions=self.box_sizes[size]["dimensions"],
-                        count=0,
-                        weight_capacity=self.box_sizes[size]["weight_capacity"],
-                        suggested_contents=[],
+                        volume=item.dimensions.volume(),
+                        weight=weight,
+                        names=[item.name],
                     )
-                requirements[size].count += count
-                requirements[size].suggested_contents.append(f"{item.name} x{count}")
+                )
+        return bins
 
-        return list(requirements.values())
+    @staticmethod
+    def _summarize(names: list[str]) -> list[str]:
+        counts: dict[str, int] = {}
+        order: list[str] = []
+        for name in names:
+            if name not in counts:
+                order.append(name)
+                counts[name] = 0
+            counts[name] += 1
+        return [f"{name} x{counts[name]}" for name in order]
 
-    def _estimate_boxes_for_item(self, item: FurnitureItem) -> dict:
-        boxes = {size: 0 for size in BoxSize}
-
-        if item.furniture_type.name in ["SOFA", "BED", "WARDROBE", "DESK"]:
-            return self._estimate_large_furniture_boxes(item)
-        elif item.furniture_type.name in ["CHAIR", "TABLE", "TV_STAND"]:
-            return self._estimate_medium_furniture_boxes(item)
-        else:
-            return self._estimate_small_furniture_boxes(item)
-
-    def _estimate_large_furniture_boxes(self, item: FurnitureItem) -> dict:
-        boxes = {size: 0 for size in BoxSize}
-
-        if item.disassemble:
-            volume = item.dimensions.volume()
-
-            xlarge_boxes = int(
-                volume // self.box_sizes[BoxSize.XLARGE]["dimensions"].volume()
-            )
-            remaining_volume = (
-                volume % self.box_sizes[BoxSize.XLARGE]["dimensions"].volume()
-            )
-
-            if (
-                remaining_volume
-                > self.box_sizes[BoxSize.LARGE]["dimensions"].volume() * 0.5
-            ):
-                boxes[BoxSize.XLARGE] = xlarge_boxes + 1
-            elif remaining_volume > 0:
-                boxes[BoxSize.XLARGE] = xlarge_boxes
-                boxes[BoxSize.LARGE] = 1
-            else:
-                boxes[BoxSize.XLARGE] = xlarge_boxes
-        else:
-            boxes[BoxSize.XLARGE] = 0
-
-        return boxes
-
-    def _estimate_medium_furniture_boxes(self, item: FurnitureItem) -> dict:
-        boxes = {size: 0 for size in BoxSize}
-
-        if item.disassemble:
-            volume = item.dimensions.volume()
-
-            large_boxes = int(
-                volume // self.box_sizes[BoxSize.LARGE]["dimensions"].volume()
-            )
-            remaining_volume = (
-                volume % self.box_sizes[BoxSize.LARGE]["dimensions"].volume()
-            )
-
-            if (
-                remaining_volume
-                > self.box_sizes[BoxSize.MEDIUM]["dimensions"].volume() * 0.5
-            ):
-                boxes[BoxSize.LARGE] = large_boxes + 1
-            elif remaining_volume > 0:
-                boxes[BoxSize.LARGE] = large_boxes
-                boxes[BoxSize.MEDIUM] = 1
-            else:
-                boxes[BoxSize.LARGE] = large_boxes
-        else:
-            boxes[BoxSize.LARGE] = 0
-
-        return boxes
-
-    def _estimate_small_furniture_boxes(self, item: FurnitureItem) -> dict:
-        boxes = {size: 0 for size in BoxSize}
-
-        volume = item.dimensions.volume() * item.quantity
-
-        medium_boxes = int(
-            volume // self.box_sizes[BoxSize.MEDIUM]["dimensions"].volume()
-        )
-        remaining_volume = (
-            volume % self.box_sizes[BoxSize.MEDIUM]["dimensions"].volume()
-        )
-
-        if (
-            remaining_volume
-            > self.box_sizes[BoxSize.SMALL]["dimensions"].volume() * 0.5
-        ):
-            boxes[BoxSize.MEDIUM] = medium_boxes + 1
-        elif remaining_volume > 0:
-            boxes[BoxSize.MEDIUM] = medium_boxes
-            boxes[BoxSize.SMALL] = 1
-        else:
-            boxes[BoxSize.MEDIUM] = medium_boxes
-
-        return boxes
-
-    def calculate_additional_boxes(
-        self, furniture_count: int, total_volume: float
-    ) -> dict:
-        additional = {size: 0 for size in BoxSize}
-
-        small_boxes = min(furniture_count // 3, 5)
-        medium_boxes = min(furniture_count // 5, 3)
-
-        additional[BoxSize.SMALL] = small_boxes
-        additional[BoxSize.MEDIUM] = medium_boxes
-
-        volume_m3 = total_volume / 1000000
-        if volume_m3 > 5:
-            additional[BoxSize.LARGE] = min(int(volume_m3 / 3), 5)
-
-        return additional
-
-    def generate_packing_tips(self, furniture_items: List[FurnitureItem]) -> List[str]:
+    def generate_packing_tips(self, furniture_items: list[FurnitureItem]) -> list[str]:
         tips = []
+        fragile = sum(item.quantity for item in furniture_items if item.fragile)
+        if fragile:
+            tips.append(f"有 {fragile} 件易碎物品，使用防震材料，并放在上层")
 
-        fragile_count = sum(1 for item in furniture_items if item.fragile)
-        if fragile_count > 0:
-            tips.append(f"有 {fragile_count} 件易碎物品，建议使用防震包装材料")
+        disassembled = [item for item in furniture_items if item.disassemble]
+        if disassembled:
+            count = sum(item.quantity for item in disassembled)
+            tips.append(f"可拆卸 {count} 件，拆下的零件按纸箱承重分装")
 
-        disassemble_count = sum(1 for item in furniture_items if item.disassemble)
-        if disassemble_count > 0:
-            tips.append(f"可以拆卸 {disassemble_count} 件家具以节省空间")
-
-        heavy_items = [
-            item for item in furniture_items if item.weight and item.weight > 20
+        missing_weight = [
+            item.name for item in furniture_items if item.weight is None
         ]
-        if heavy_items:
-            tips.append("重物应使用加固纸箱，并分散放置")
+        if missing_weight:
+            tips.append("部分物品没有重量，箱数未按承重加计，确认重量后请重算")
 
-        tips.append("每箱重量建议不超过25kg")
-        tips.append("物品间应填充缓冲材料防止碰撞")
-        tips.append("在纸箱外标注内容物和房间位置")
-
+        if any(not rides_loose(item, self.box_sizes) for item in furniture_items):
+            tips.append("单箱重量不要超过该规格承重，箱外标上内容和房间")
         return tips
