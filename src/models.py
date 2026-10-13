@@ -1,6 +1,7 @@
-from typing import List, Optional, Dict, Any
-from dataclasses import dataclass
 from enum import Enum
+from typing import Optional
+
+from pydantic import BaseModel, Field
 
 
 class BoxSize(str, Enum):
@@ -23,52 +24,90 @@ class FurnitureType(str, Enum):
     OTHER = "other"
 
 
-@dataclass
-class Dimensions:
-    length: float
-    width: float
-    height: float
+class Dimensions(BaseModel):
+    length: float = Field(gt=0)
+    width: float = Field(gt=0)
+    height: float = Field(gt=0)
     unit: str = "cm"
 
     def volume(self) -> float:
         return self.length * self.width * self.height
 
 
-@dataclass
-class FurnitureItem:
+class FurnitureItem(BaseModel):
     name: str
     furniture_type: FurnitureType
     dimensions: Dimensions
-    weight: Optional[float] = None
+    weight: Optional[float] = Field(default=None, gt=0)
     disassemble: bool = False
     fragile: bool = False
-    quantity: int = 1
+    quantity: int = Field(default=1, ge=1)
     description: Optional[str] = None
+    dimensions_confirmed: bool = False
 
 
-@dataclass
-class BoxRequirement:
+class BoxRequirement(BaseModel):
     size: BoxSize
     dimensions: Dimensions
-    count: int
+    count: int = Field(ge=0)
     weight_capacity: float
-    suggested_contents: List[str]
+    suggested_contents: list[str] = Field(default_factory=list)
 
 
-@dataclass
-class SpaceEstimation:
-    total_volume: float
-    packed_volume: float
-    truck_size_required: str
-    layout_suggestions: List[str]
+class SpaceEstimation(BaseModel):
+    total_volume_cm3: float
+    loose_volume_cm3: float
+    box_volume_cm3: float
+    effective_volume_cm3: float
+    truck_name: str
+    truck_capacity_m3: float
+    trips: int = Field(ge=1)
     packing_efficiency: float
+    layout_suggestions: list[str]
+    items_exceed_all_doors: list[str] = Field(default_factory=list)
 
 
-@dataclass
-class MovingPlan:
-    furniture_items: List[FurnitureItem]
+class MoveContext(BaseModel):
+    distance_km: float = Field(default=10, ge=0)
+    origin_floor: int = Field(default=1, ge=1)
+    destination_floor: int = Field(default=1, ge=1)
+    origin_has_elevator: bool = True
+    destination_has_elevator: bool = True
+
+    def stair_floors(self) -> int:
+        stairs = 0
+        if not self.origin_has_elevator:
+            stairs += self.origin_floor - 1
+        if not self.destination_has_elevator:
+            stairs += self.destination_floor - 1
+        return stairs
+
+
+class CostBreakdown(BaseModel):
+    transport: float
+    boxes: float
+    labor: float
+    total: float
+
+
+class MovingPlan(BaseModel):
+    furniture_items: list[FurnitureItem]
     space_estimation: SpaceEstimation
-    box_requirements: List[BoxRequirement]
-    total_cost_estimate: Optional[float] = None
-    estimated_time: Optional[str] = None
-    tips: Optional[List[str]] = None
+    box_requirements: list[BoxRequirement]
+    loading_order: list[str]
+    total_cost_estimate: float
+    cost_breakdown: CostBreakdown
+    estimated_time: str
+    tips: list[str]
+    context: MoveContext
+    dimensions_confirmed: bool
+
+
+class RecommendResponse(BaseModel):
+    plan: MovingPlan
+    recommendations: str
+
+
+class RecalculateRequest(BaseModel):
+    furniture_items: list[FurnitureItem]
+    context: MoveContext = Field(default_factory=MoveContext)
