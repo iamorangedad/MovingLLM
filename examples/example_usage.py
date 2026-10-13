@@ -6,7 +6,7 @@
 import sys
 import os
 
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.agent import MovingLLMAgent
 
@@ -29,7 +29,8 @@ def example_usage():
 
         print(f"识别到的家具数量: {len(plan.furniture_items)}")
         print(f"所需纸箱总数: {sum(req.count for req in plan.box_requirements)}")
-        print(f"建议车辆: {plan.space_estimation.truck_size_required}")
+        print(f"建议车辆: {plan.space_estimation.truck_name}")
+        print(f"尺寸已确认: {plan.dimensions_confirmed}")
         print(f"预计费用: ¥{plan.total_cost_estimate}")
 
         print(
