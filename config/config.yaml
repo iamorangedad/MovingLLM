@@ -1,25 +1,77 @@
-OPENAI_API_KEY: your_openai_api_key_here
-OPENAI_MODEL: gpt-4-vision-preview
-MAX_IMAGE_SIZE: 4194304
+model: gpt-4o
 
-image_analysis:
+image:
+  max_edge_px: 2048
+  jpeg_quality: 85
+  max_bytes: 4194304
   confidence_threshold: 0.7
   max_detections: 10
 
 box_sizes:
   small:
-    dimensions: [30, 30, 30]  # cm
-    weight_capacity: 10  # kg
+    dimensions: [30, 30, 30]
+    weight_capacity: 10
+    price: 8
   medium:
     dimensions: [45, 45, 45]
     weight_capacity: 20
+    price: 15
   large:
     dimensions: [60, 60, 60]
     weight_capacity: 30
+    price: 25
   xlarge:
     dimensions: [75, 75, 75]
     weight_capacity: 40
+    price: 40
 
-space_estimation:
-  padding_factor: 1.2
+packing:
+  loose_padding_factor: 1.15
+  box_fill_factor: 0.65
   stacking_factor: 0.85
+
+trucks:
+  - name: 小型厢式车
+    capacity_m3: 3
+    max_item_length_cm: 200
+    door_width_cm: 110
+    door_height_cm: 110
+  - name: 中型厢式车
+    capacity_m3: 8
+    max_item_length_cm: 280
+    door_width_cm: 140
+    door_height_cm: 140
+  - name: 大型厢式车
+    capacity_m3: 15
+    max_item_length_cm: 400
+    door_width_cm: 160
+    door_height_cm: 170
+  - name: 小型货车
+    capacity_m3: 20
+    max_item_length_cm: 420
+    door_width_cm: 180
+    door_height_cm: 180
+  - name: 大型货车
+    capacity_m3: 30
+    max_item_length_cm: 600
+    door_width_cm: 220
+    door_height_cm: 220
+
+cost:
+  transport_per_m3: 150
+  transport_per_km: 8
+  labor_per_m3: 80
+  labor_minimum: 200
+  floor_surcharge: 40
+
+time:
+  minutes_per_item: 15
+  minutes_per_m3: 30
+  minutes_per_floor_without_elevator: 12
+
+move_defaults:
+  distance_km: 10
+  origin_floor: 1
+  destination_floor: 1
+  origin_has_elevator: true
+  destination_has_elevator: true
