@@ -253,6 +253,10 @@ def _format_plan(plan: MovingPlan) -> str:
 装载顺序:
 {chr(10).join(plan.loading_order) or "- 无"}
 
+三维摆放（{plan.cargo_layout.axis_note}）:
+{chr(10).join(f"- {item.note}：{item.name}" for item in plan.cargo_layout.placements[:40]) or "- 无"}
+{("放不下: " + "、".join(plan.cargo_layout.unplaced)) if plan.cargo_layout.unplaced else ""}
+
 行程: {plan.context.distance_km} km，楼梯层数 {plan.context.stair_floors()}
 费用: ¥{plan.total_cost_estimate}
 工时: {plan.estimated_time}
