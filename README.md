@@ -35,7 +35,12 @@ python main.py furniture.jpg --recommend
 python api_server.py
 ```
 
-- `POST /analyze`：上传图片，返回 `MovingPlan`
+浏览器打开 `http://localhost:8000/view`。页面把计划画成车厢：后部先装，地板是底层，左壁和右壁用颜色区分。可以拖动旋转，或切换车门、顶视、左侧。
+
+「看示例」使用内置家具调用 `POST /recalculate`，不访问模型。上传照片则调用 `POST /analyze`。
+
+- `GET /view`：三维装车页面
+- `POST /analyze`：上传图片，返回 `MovingPlan`，其中 `cargo_layout` 是坐标
 - `POST /recommend`：上传图片，返回计划和文字建议
 - `POST /recalculate`：提交确认后的家具清单和行程，不调用模型
 
@@ -83,4 +88,4 @@ pytest
 
 ## 说明
 
-车辆和纸箱按 `docs/design.md` 的规则计算：大件默认散装，纸箱同时受外形和承重约束，装载效率是有效体积占所选车厢的比例。费用使用配置中的单价，并随距离、楼层和电梯变化。
+车辆和纸箱按 `docs/design.md` 的规则计算：大件默认散装，纸箱同时受外形和承重约束，装载效率是有效体积占所选车厢的比例。费用使用配置中的单价，并随距离、楼层和电梯变化。三维摆放使用车厢内尺寸，把散装家具和纸箱放到左右、上下和前后的具体位置；它不是最优装箱。
