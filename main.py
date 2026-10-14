@@ -69,6 +69,25 @@ def print_plan(plan):
         print(f"{index}. {label}")
     print()
 
+    layout = plan.cargo_layout
+    print("-" * 60)
+    print(
+        f"三维装车: {layout.truck_name} "
+        f"（内尺寸 {layout.length_cm:g}×{layout.width_cm:g}×{layout.height_cm:g} cm）"
+    )
+    print(layout.axis_note)
+    if not layout.placements:
+        print("没有放入车厢的物品")
+    for index, item in enumerate(layout.placements, 1):
+        print(
+            f"{index}. 第{item.trip}趟 {item.name} "
+            f"{item.width_cm:g}×{item.height_cm:g}×{item.depth_cm:g} cm"
+        )
+        print(f"   {item.note}")
+    if layout.unplaced:
+        print("无法摆入: " + "、".join(layout.unplaced))
+    print()
+
     print("-" * 60)
     print("纸箱需求:")
     if not plan.box_requirements:
