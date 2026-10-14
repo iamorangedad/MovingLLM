@@ -12,6 +12,7 @@ MovingLLMAgent          编排，不含供应商 SDK
 MovingLLMProvider       图像识别、文字建议（可替换）
 SpaceEstimator          车厢体积、车型、装载顺序
 BoxCalculator           纸箱数量
+CargoLayoutPlanner      车厢内左右、上下、前后位置
     ↓
 MovingPlan              唯一对外结果
 ```
@@ -26,8 +27,9 @@ MovingPlan              唯一对外结果
 | `src/cargo.py` | 判断一件家具是散装还是装箱 | 调模型、读环境变量 |
 | `src/box_calculator.py` | 按外包络、容积和承重算箱数 | 调模型 |
 | `src/space_estimator.py` | 把散装体积和纸箱外体积合成车厢需求 | 再把同一件家具的体积加第二次 |
+| `src/layout.py` | 按装载顺序把散装外形和纸箱放进车厢内尺寸 | 调模型、改体积、改车型或报价 |
 | `src/agent.py` | 按顺序调用上面的模块，套用配置里的费用和工时 | 直接构造 OpenAI 客户端 |
-| `main.py`、`api_server.py` | 参数、上传、序列化 | 复制一套估算公式 |
+| `main.py`、`api_server.py`、`web/viewer.html` | 参数、上传、序列化、按坐标绘制 | 复制一套估算公式 |
 
 新增模型供应商时实现 `MovingLLMProvider`，不要在 Agent 里写分支。
 
@@ -37,9 +39,10 @@ MovingPlan              唯一对外结果
 2. `rides_loose` 把每件家具分成散装或装箱。
 3. 装箱家具只贡献纸箱的外体积。散装家具只贡献自身外包络乘以松散填充系数。
 4. 用有效体积和车厢门尺寸选择车型，装载效率 = 有效体积 /（趟数 × 车厢容积）。
-5. 费用和工时读取配置，并使用本次的距离、楼层、电梯。
-6. 用户改完尺寸后调用 `plan_from_items` 或 `POST /recalculate`。这条路径不再访问模型，并把 `dimensions_confirmed` 设为 `true`。
+5. `CargoLayoutPlanner` 只使用已经算好的车型和纸箱，写入左右、上下、前后坐标。
+6. 费用和工时读取配置，并使用本次的距离、楼层、电梯。
+7. 用户改完尺寸后调用 `plan_from_items` 或 `POST /recalculate`。这条路径不再访问模型，并把 `dimensions_confirmed` 设为 `true`。三维页面用这份结果重画。
 
 ## 结果对象
 
-`MovingPlan` 是命令行和 HTTP 的同一份结构，包含家具、空间、纸箱、装载顺序、费用明细、工时、提示和本次 `MoveContext`。接口层不要再用 `dataclass.__dict__` 手工拼 JSON。
+`MovingPlan` 是命令行和 HTTP 的同一份结构，包含家具、空间、纸箱、装载顺序、三维摆放、费用明细、工时、提示和本次 `MoveContext`。接口层不要再用 `dataclass.__dict__` 手工拼 JSON。`GET /view` 只读取 `cargo_layout` 里的坐标。

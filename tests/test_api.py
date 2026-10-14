@@ -54,6 +54,8 @@ def test_analyze_persists_upload_before_planning(monkeypatch):
     assert body["furniture_items"][0]["name"] == "抽屉"
     assert body["dimensions_confirmed"] is False
     assert body["loading_order"]
+    assert body["cargo_layout"]["placements"]
+    assert body["cargo_layout"]["axis_note"]
 
 
 def test_analyze_rejects_empty_non_image_and_oversize_files(monkeypatch):
@@ -95,6 +97,13 @@ def test_recalculate_skips_vision_and_marks_dimensions_confirmed():
     assert body["furniture_items"][0]["dimensions_confirmed"] is True
     assert body["context"]["origin_floor"] == 3
     assert body["context"]["origin_has_elevator"] is False
+
+
+def test_view_page_is_served():
+    response = _client(RecordingProvider()).get("/view")
+    assert response.status_code == 200
+    assert "三维装车" in response.text
+    assert "cargo_layout" in response.text
 
 
 def test_analyze_distance_changes_transport():

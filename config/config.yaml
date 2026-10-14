@@ -33,26 +33,41 @@ packing:
 trucks:
   - name: 小型厢式车
     capacity_m3: 3
+    length_cm: 240
+    width_cm: 160
+    height_cm: 130
     max_item_length_cm: 200
     door_width_cm: 110
     door_height_cm: 110
   - name: 中型厢式车
     capacity_m3: 8
+    length_cm: 360
+    width_cm: 180
+    height_cm: 170
     max_item_length_cm: 280
     door_width_cm: 140
     door_height_cm: 140
   - name: 大型厢式车
     capacity_m3: 15
+    length_cm: 450
+    width_cm: 200
+    height_cm: 190
     max_item_length_cm: 400
     door_width_cm: 160
     door_height_cm: 170
   - name: 小型货车
     capacity_m3: 20
+    length_cm: 520
+    width_cm: 220
+    height_cm: 210
     max_item_length_cm: 420
     door_width_cm: 180
     door_height_cm: 180
   - name: 大型货车
     capacity_m3: 30
+    length_cm: 700
+    width_cm: 240
+    height_cm: 230
     max_item_length_cm: 600
     door_width_cm: 220
     door_height_cm: 220

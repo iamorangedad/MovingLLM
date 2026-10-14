@@ -3,6 +3,7 @@ import tempfile
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import ValidationError
 
 from src.agent import MovingLLMAgent
@@ -11,6 +12,7 @@ from src.errors import ConfigurationError, VisionParseError
 from src.models import MoveContext, MovingPlan, RecalculateRequest, RecommendResponse
 
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
+VIEW_PAGE = Path(__file__).resolve().parent / "web" / "viewer.html"
 
 
 def create_app(agent: MovingLLMAgent | None = None) -> FastAPI:
@@ -23,11 +25,16 @@ def create_app(agent: MovingLLMAgent | None = None) -> FastAPI:
             "message": "MovingLLM API",
             "version": "1.1.0",
             "endpoints": {
+                "/view": "GET 三维装车页面",
                 "/analyze": "POST 上传图片并生成搬家计划",
                 "/recommend": "POST 上传图片并生成文字建议",
                 "/recalculate": "POST 用确认后的家具清单重算，不调用模型",
             },
         }
+
+    @app.get("/view")
+    def cargo_view():
+        return FileResponse(VIEW_PAGE)
 
     @app.post("/analyze", response_model=MovingPlan)
     async def analyze_moving(

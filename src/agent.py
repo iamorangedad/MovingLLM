@@ -1,5 +1,6 @@
 from src.box_calculator import BoxCalculator
 from src.config import default_context, get_settings
+from src.layout import CargoLayoutPlanner
 from src.models import (
     CostBreakdown,
     FurnitureItem,
@@ -16,6 +17,7 @@ class MovingLLMAgent:
         self._provider = provider
         self.space_estimator = SpaceEstimator(self.settings)
         self.box_calculator = BoxCalculator(self.settings)
+        self.layout_planner = CargoLayoutPlanner(self.settings)
 
     def analyze_moving_plan(
         self,
@@ -47,8 +49,19 @@ class MovingLLMAgent:
             furniture_items, box_requirements
         )
         loading_order = self.space_estimator.loading_order(furniture_items)
+        cargo_layout = self.layout_planner.place(
+            furniture_items, box_requirements, space_estimation.truck_name
+        )
         tips = self.box_calculator.generate_packing_tips(furniture_items)
         tips.extend(space_estimation.layout_suggestions)
+        if cargo_layout.unplaced:
+            names = "、".join(cargo_layout.unplaced)
+            tips.append(f"按车厢内尺寸无法摆入：{names}")
+        if cargo_layout.placements and cargo_layout.trips != space_estimation.trips:
+            tips.append(
+                f"按外形摆放需要 {cargo_layout.trips} 趟，"
+                f"按体积估算是 {space_estimation.trips} 趟"
+            )
         if furniture_items and not all(
             item.dimensions_confirmed for item in furniture_items
         ):
@@ -72,6 +85,7 @@ class MovingLLMAgent:
             space_estimation=space_estimation,
             box_requirements=box_requirements,
             loading_order=loading_order,
+            cargo_layout=cargo_layout,
             total_cost_estimate=cost.total,
             cost_breakdown=cost,
             estimated_time=estimated_time,

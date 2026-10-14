@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MovingLLM 三维装车</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #1c1915;
+      --muted: #6b645c;
+      --line: #e4dcd2;
+      --paper: #f6f1ea;
+      --panel: #fffdf9;
+      --accent: #9a5b32;
+      --left: #2f6f9f;
+      --right: #c46a2f;
+      --floor: #8a8175;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+      color: var(--ink);
+      background: var(--paper);
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-end;
+      padding: 20px 24px 12px;
+    }
+    h1 { margin: 0; font-size: 22px; font-weight: 650; }
+    header p { margin: 6px 0 0; color: var(--muted); font-size: 14px; max-width: 720px; }
+    .layout {
+      display: grid;
+      grid-template-columns: 340px 1fr;
+      gap: 16px;
+      padding: 0 24px 24px;
+      min-height: calc(100vh - 96px);
+    }
+    .panel, .stage {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+    }
+    .panel { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+    label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+    input[type="file"], input[type="number"] {
+      width: 100%;
+      font: inherit;
+    }
+    .row { display: flex; gap: 8px; }
+    button, .preset {
+      font: inherit;
+      border: 0;
+      border-radius: 999px;
+      padding: 8px 12px;
+      background: var(--ink);
+      color: white;
+      cursor: pointer;
+    }
+    button.secondary, .preset { background: #efe8df; color: var(--ink); }
+    button:disabled { opacity: 0.5; cursor: wait; }
+    .status { min-height: 20px; font-size: 13px; color: var(--accent); }
+    .summary { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .summary div {
+      background: #f7f3ee;
+      border-radius: 10px;
+      padding: 8px 10px;
+      font-size: 13px;
+    }
+    .summary strong { display: block; font-size: 14px; }
+    .trips, .presets { display: flex; flex-wrap: wrap; gap: 6px; }
+    .preset.active { background: var(--ink); color: white; }
+    ul.items { list-style: none; margin: 0; padding: 0; overflow: auto; max-height: 280px; }
+    ul.items li {
+      border-top: 1px solid var(--line);
+      padding: 8px 4px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    ul.items li.active { background: #f3ebe3; border-radius: 8px; }
+    ul.items small { display: block; color: var(--muted); }
+    .legend { display: flex; flex-wrap: wrap; gap: 8px 12px; font-size: 12px; color: var(--muted); }
+    .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; }
+    .stage { position: relative; height: calc(100vh - 150px); min-height: 520px; overflow: hidden; }
+    canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; }
+    button.secondary.active { background: var(--ink); color: white; }
+    canvas.dragging { cursor: grabbing; }
+    .hud {
+      position: absolute;
+      left: 16px;
+      right: 16px;
+      bottom: 14px;
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      color: #d9d0c6;
+      font-size: 12px;
+      pointer-events: none;
+    }
+    .banner {
+      margin: 0 24px 12px;
+      padding: 10px 14px;
+      border-radius: 10px;
+      background: #fff4e8;
+      color: #6d4a2b;
+      font-size: 13px;
+    }
+    @media (max-width: 860px) {
+      .layout { grid-template-columns: 1fr; }
+      .stage { order: -1; height: 68vh; min-height: 420px; }
+      header { flex-direction: column; align-items: flex-start; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>三维装车</h1>
+      <p>大件靠车厢后部、贴着地板；易碎物品放到有支撑的上层。左侧、右侧和底层都是车厢里的位置，不是模型随口描述。</p>
+    </div>
+    <div class="presets" id="presets"></div>
+  </header>
+  <div class="banner" id="banner">先看示例摆放，或上传家具照片。照片分析需要 API 密钥；示例不调用模型。</div>
+  <div class="layout">
+    <aside class="panel">
+      <div>
+        <label for="files">家具照片</label>
+        <input id="files" type="file" accept="image/*" multiple />
+      </div>
+      <div class="row">
+        <button id="analyze" type="button">分析照片并装车</button>
+        <button id="sample" class="secondary" type="button">看示例</button>
+      </div>
+      <div class="status" id="status"></div>
+      <div class="summary" id="summary"></div>
+      <div class="trips" id="trips"></div>
+      <ul class="items" id="items"></ul>
+      <div class="legend">
+        <span><i class="swatch" style="background:#2f6f9f"></i>左壁</span>
+        <span><i class="swatch" style="background:#c46a2f"></i>右壁</span>
+        <span><i class="swatch" style="background:#c9a36a"></i>纸箱</span>
+        <span><i class="swatch" style="background:#d46a8a"></i>易碎</span>
+      </div>
+    </aside>
+    <section class="stage">
+      <canvas id="scene"></canvas>
+      <div class="hud">
+        <span id="axis">拖动旋转，滚轮缩放。车门在近处时，远处就是先装的后部。</span>
+        <span id="picked"></span>
+      </div>
+    </section>
+  </div>
+  <script>
+    const sampleItems = {
+      furniture_items: [
+        { name: "衣柜", furniture_type: "wardrobe", dimensions: { length: 180, width: 60, height: 200 }, weight: 70, quantity: 1 },
+        { name: "沙发", furniture_type: "sofa", dimensions: { length: 200, width: 90, height: 85 }, weight: 40, quantity: 1 },
+        { name: "床", furniture_type: "bed", dimensions: { length: 200, width: 150, height: 45 }, weight: 45, quantity: 1 },
+        { name: "立灯", furniture_type: "other", dimensions: { length: 40, width: 40, height: 160 }, weight: 6, quantity: 1 },
+        { name: "穿衣镜", furniture_type: "other", dimensions: { length: 90, width: 40, height: 15 }, weight: 12, fragile: true, quantity: 1 },
+        { name: "抽屉杂物", furniture_type: "drawer", dimensions: { length: 40, width: 30, height: 20 }, weight: 4, quantity: 4 }
+      ],
+      context: { distance_km: 10, origin_floor: 1, destination_floor: 1, origin_has_elevator: true, destination_has_elevator: true }
+    };
+
+    const cameras = {
+      "斜看": { yaw: -0.75, pitch: 0.52, zoom: 1 },
+      "车门": { yaw: 0.02, pitch: 0.28, zoom: 1.05 },
+      "顶视": { yaw: -0.15, pitch: 1.25, zoom: 1.05 },
+      "左侧": { yaw: -1.57, pitch: 0.28, zoom: 1.05 }
+    };
+    const sideText = { left: "左侧", center: "中间", right: "右侧" };
+    const levelText = { bottom: "底层", middle: "中层", top: "上层" };
+    const typeColor = {
+      wardrobe: "#6b4c38",
+      sofa: "#3f6f8f",
+      bed: "#8a7058",
+      desk: "#5f8f73",
+      table: "#5f8f73",
+      bookshelf: "#6e5a45",
+      chair: "#4f7f72",
+      drawer: "#4f7f72",
+      tv_stand: "#4f7f72",
+      other: "#4f7f72"
+    };
+
+    const canvas = document.getElementById("scene");
+    const ctx = canvas.getContext("2d");
+    let plan = null;
+    let trip = 1;
+    let selected = -1;
+    let yaw = cameras["斜看"].yaw;
+    let pitch = cameras["斜看"].pitch;
+    let zoom = 1;
+    let dragging = false;
+    let last = null;
+
+    function colorOf(item) {
+      if (item.fragile) return "#d46a8a";
+      if (item.kind === "box") return "#c9a36a";
+      return typeColor[item.furniture_type] || "#4f7f72";
+    }
+
+    function resize() {
+      const rect = canvas.parentElement.getBoundingClientRect();
+      const ratio = window.devicePixelRatio || 1;
+      canvas.width = Math.max(1, rect.width) * ratio;
+      canvas.height = Math.max(1, rect.height) * ratio;
+      draw();
+    }
+
+    function project(x, y, z, layout) {
+      const px = x - layout.width_cm / 2;
+      const py = y - layout.height_cm / 2;
+      const pz = z - layout.length_cm / 2;
+      const cy = Math.cos(yaw);
+      const sy = Math.sin(yaw);
+      const x1 = px * cy + pz * sy;
+      const z1 = -px * sy + pz * cy;
+      const cp = Math.cos(pitch);
+      const sp = Math.sin(pitch);
+      const y1 = py * cp - z1 * sp;
+      const z2 = py * sp + z1 * cp;
+      const span = Math.max(layout.length_cm, layout.width_cm, layout.height_cm);
+      const distance = span * 1.55 * zoom;
+      const focal = Math.min(canvas.width, canvas.height) * 0.72;
+      const perspective = focal / (distance - z2);
+      return {
+        x: canvas.width / 2 + x1 * perspective,
+        y: canvas.height / 2 - y1 * perspective,
+        depth: z2
+      };
+    }
+
+    function shade(hex, factor) {
+      const value = parseInt(hex.slice(1), 16);
+      const channels = [16, 8, 0].map((shift) => {
+        const channel = (value >> shift) & 255;
+        return Math.max(0, Math.min(255, Math.round(channel * factor)));
+      });
+      return `rgb(${channels[0]}, ${channels[1]}, ${channels[2]})`;
+    }
+
+    function facePath(points) {
+      ctx.beginPath();
+      ctx.moveTo(points[0].x, points[0].y);
+      for (let index = 1; index < points.length; index += 1) {
+        ctx.lineTo(points[index].x, points[index].y);
+      }
+      ctx.closePath();
+    }
+
+    function boxFaces(item, layout, selectedItem) {
+      const x = item.x_cm;
+      const y = item.y_cm;
+      const z = item.z_cm;
+      const w = item.width_cm;
+      const h = item.height_cm;
+      const d = item.depth_cm;
+      const corners = [
+        [x, y, z], [x + w, y, z], [x + w, y, z + d], [x, y, z + d],
+        [x, y + h, z], [x + w, y + h, z], [x + w, y + h, z + d], [x, y + h, z + d]
+      ].map((point) => project(point[0], point[1], point[2], layout));
+      const faces = [
+        [0, 1, 2, 3, 0.55],
+        [4, 5, 6, 7, 1],
+        [0, 1, 5, 4, 0.72],
+        [3, 2, 6, 7, 0.8],
+        [0, 3, 7, 4, 0.64],
+        [1, 2, 6, 5, 0.9]
+      ];
+      return faces.map((face) => {
+        const points = face.slice(0, 4).map((index) => corners[index]);
+        const depth = points.reduce((sum, point) => sum + point.depth, 0) / 4;
+        return { points, depth, shade: face[4], item, selected: selectedItem };
+      });
+    }
+
+    function drawTruck(layout, faces) {
+      const w = layout.width_cm;
+      const h = layout.height_cm;
+      const d = layout.length_cm;
+      const floor = [
+        project(0, 0, 0, layout),
+        project(w, 0, 0, layout),
+        project(w, 0, d, layout),
+        project(0, 0, d, layout)
+      ];
+      faces.push({ points: floor, depth: floor.reduce((sum, point) => sum + point.depth, 0) / 4 - 5000, floor: true });
+    }
+
+    function strokeLine(a, b) {
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+    }
+
+    function drawWire(layout) {
+      const w = layout.width_cm;
+      const h = layout.height_cm;
+      const d = layout.length_cm;
+      const pairs = [[0, 1], [2, 3], [4, 5], [6, 7], [0, 2], [1, 3], [4, 6], [5, 7], [0, 4], [1, 5], [2, 6], [3, 7]];
+      const pts = [
+        project(0, 0, 0, layout), project(w, 0, 0, layout), project(w, 0, d, layout), project(0, 0, d, layout),
+        project(0, h, 0, layout), project(w, h, 0, layout), project(w, h, d, layout), project(0, h, d, layout)
+      ];
+      ctx.lineWidth = Math.max(1, canvas.width / 700);
+      ctx.strokeStyle = "rgba(232, 224, 214, 0.85)";
+      pairs.forEach(([a, b]) => strokeLine(pts[a], pts[b]));
+      ctx.strokeStyle = "#69b4e0";
+      ctx.lineWidth = Math.max(2, canvas.width / 420);
+      strokeLine(pts[0], pts[4]);
+      strokeLine(pts[3], pts[7]);
+      ctx.strokeStyle = "#e39a62";
+      strokeLine(pts[1], pts[5]);
+      strokeLine(pts[2], pts[6]);
+      const doorW = Math.min(layout.door_width_cm, w);
+      const doorH = Math.min(layout.door_height_cm, h);
+      const doorX = (w - doorW) / 2;
+      const door = [
+        project(doorX, 0, d, layout),
+        project(doorX + doorW, 0, d, layout),
+        project(doorX + doorW, doorH, d, layout),
+        project(doorX, doorH, d, layout)
+      ];
+      ctx.strokeStyle = "#f2efe9";
+      ctx.lineWidth = Math.max(2, canvas.width / 500);
+      facePath(door);
+      ctx.stroke();
+      labelAt(outerPoint(layout, [
+        [w / 2, -36, d],
+        [w / 2, 0, d + 20]
+      ], (point) => point.y), "车门 · 后卸", "#f2efe9");
+      labelAt(outerPoint(layout, [
+        [w / 2, h + 36, -20],
+        [w / 2, h, -20]
+      ], (point) => -point.y), "后部 · 先装", "#f2efe9");
+      labelAt(outerPoint(layout, [
+        [-36, h * 0.45, 0],
+        [-36, h * 0.45, d]
+      ], (point) => -point.x), "左", "#8ec8ef");
+      labelAt(outerPoint(layout, [
+        [w + 36, h * 0.45, 0],
+        [w + 36, h * 0.45, d]
+      ], (point) => point.x), "右", "#f0b48a");
+    }
+
+    function outerPoint(layout, points, score) {
+      return points
+        .map((point) => project(point[0], point[1], point[2], layout))
+        .reduce((best, point) => (score(point) > score(best) ? point : best));
+    }
+
+    function labelAt(point, text, color) {
+      ctx.font = `${Math.max(13, canvas.width / 68)}px "Noto Sans SC", sans-serif`;
+      ctx.textAlign = "center";
+      ctx.lineWidth = Math.max(3, canvas.width / 400);
+      ctx.strokeStyle = "rgba(12, 14, 16, 0.85)";
+      ctx.strokeText(text, point.x, point.y);
+      ctx.fillStyle = color;
+      ctx.fillText(text, point.x, point.y);
+    }
+
+    function shortLabel(item) {
+      if (item.kind === "box") return item.name.split("（")[0];
+      return item.name;
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const sky = ctx.createLinearGradient(0, 0, 0, canvas.height);
+      sky.addColorStop(0, "#243038");
+      sky.addColorStop(1, "#14181c");
+      ctx.fillStyle = sky;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      if (!plan) {
+        ctx.fillStyle = "#d9d0c6";
+        ctx.font = "16px sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText("装车结果会显示在这节车厢里", canvas.width / 2, canvas.height / 2);
+        return;
+      }
+      const layout = plan.cargo_layout;
+      const visible = layout.placements.filter((item) => item.trip === trip);
+      const faces = [];
+      drawTruck(layout, faces);
+      visible.forEach((item, index) => faces.push(...boxFaces(item, layout, index === selected)));
+      faces.sort((a, b) => a.depth - b.depth);
+      faces.forEach((face) => {
+        facePath(face.points);
+        if (face.floor) {
+          ctx.fillStyle = "#8a7563";
+          ctx.fill();
+          return;
+        }
+        ctx.fillStyle = shade(colorOf(face.item), face.shade);
+        ctx.fill();
+        ctx.lineWidth = face.selected ? Math.max(2, canvas.width / 500) : 1;
+        ctx.strokeStyle = face.selected ? "#f6d98a" : "rgba(20, 16, 12, 0.35)";
+        ctx.stroke();
+      });
+      drawWire(layout);
+      if (visible.length <= 14) {
+        visible.forEach((item, index) => {
+          const point = project(
+            item.x_cm + item.width_cm / 2,
+            item.y_cm + item.height_cm + 6,
+            item.z_cm + item.depth_cm / 2,
+            layout
+          );
+          labelAt(point, shortLabel(item), index === selected ? "#f6d98a" : "#f7f1ea");
+        });
+      }
+    }
+
+    function renderPlan(next, message, options = {}) {
+      plan = next;
+      trip = plan.cargo_layout.placements[0]?.trip || 1;
+      selected = 0;
+      document.getElementById("status").textContent = message;
+      document.getElementById("banner").textContent = options.sample
+        ? "示例家具只用来看摆放，没有调用模型。拖动车厢，或切换车门、顶视、左侧。"
+        : plan.dimensions_confirmed
+          ? "这份计划的尺寸已确认。拖动画布可以转到车门、顶视和左侧。"
+          : "尺寸还没确认。三维位置按当前估算摆放，确认尺寸后请重新分析或重算。";
+      const space = plan.space_estimation;
+      const layout = plan.cargo_layout;
+      document.getElementById("summary").innerHTML = [
+        ["车辆", space.truck_name],
+        ["外形趟数", `${layout.trips} 趟`],
+        ["体积估算", `${space.trips} 趟 / ${space.packing_efficiency}%`],
+        ["费用", `¥${plan.total_cost_estimate}`]
+      ].map(([name, value]) => `<div>${name}<strong>${value}</strong></div>`).join("");
+      document.getElementById("axis").textContent = layout.axis_note;
+      const trips = document.getElementById("trips");
+      trips.innerHTML = "";
+      for (let number = 1; number <= Math.max(layout.trips, 1); number += 1) {
+        const button = document.createElement("button");
+        button.className = "secondary";
+        button.textContent = `第 ${number} 趟`;
+        if (number === trip) button.classList.add("active");
+        button.addEventListener("click", () => {
+          trip = number;
+          selected = 0;
+          trips.querySelectorAll("button").forEach((item) => item.classList.remove("active"));
+          button.classList.add("active");
+          renderList();
+          draw();
+        });
+        trips.appendChild(button);
+      }
+      if (layout.unplaced.length) {
+        const note = document.createElement("div");
+        note.className = "status";
+        note.textContent = `放不进车厢：${layout.unplaced.join("、")}`;
+        trips.appendChild(note);
+      }
+      renderList();
+      draw();
+    }
+
+    function renderList() {
+      const list = document.getElementById("items");
+      const picked = document.getElementById("picked");
+      list.innerHTML = "";
+      const visible = plan.cargo_layout.placements.filter((item) => item.trip === trip);
+      visible.forEach((item, index) => {
+        const row = document.createElement("li");
+        if (index === selected) row.classList.add("active");
+        const title = document.createElement("strong");
+        title.textContent = `${item.name} · ${sideText[item.side]} · ${levelText[item.level]}`;
+        const detail = document.createElement("small");
+        detail.textContent = item.note;
+        row.append(title, detail);
+        row.addEventListener("click", () => {
+          selected = index;
+          picked.textContent = item.note;
+          renderList();
+          draw();
+        });
+        list.appendChild(row);
+      });
+      const current = visible[selected];
+      picked.textContent = current ? current.note : "";
+    }
+
+    async function loadSample() {
+      setBusy(true);
+      try {
+        const response = await fetch("/recalculate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(sampleItems)
+        });
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.detail || "示例装车失败");
+        renderPlan(body, "衣柜贴在后部底层，立灯在右侧，穿衣镜放在沙发上方。", { sample: true });
+      } catch (error) {
+        document.getElementById("status").textContent = error.message;
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    async function analyzePhotos() {
+      const files = document.getElementById("files").files;
+      if (!files.length) {
+        document.getElementById("status").textContent = "请先选择照片，或直接看示例。";
+        return;
+      }
+      const form = new FormData();
+      Array.from(files).forEach((file) => form.append("files", file));
+      setBusy(true);
+      try {
+        const response = await fetch("/analyze", { method: "POST", body: form });
+        const body = await response.json();
+        if (!response.ok) throw new Error(detailText(body.detail) || "分析失败");
+        renderPlan(body, `识别到 ${body.furniture_items.length} 件家具，已按规则摆进车厢。`);
+      } catch (error) {
+        document.getElementById("status").textContent = error.message;
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    function detailText(detail) {
+      if (!detail) return "";
+      if (typeof detail === "string") return detail;
+      return JSON.stringify(detail);
+    }
+
+    function setBusy(busy) {
+      document.getElementById("analyze").disabled = busy;
+      document.getElementById("sample").disabled = busy;
+    }
+
+    function hitTest(event) {
+      if (!plan) return;
+      const rect = canvas.getBoundingClientRect();
+      const ratio = canvas.width / rect.width;
+      const x = (event.clientX - rect.left) * ratio;
+      const y = (event.clientY - rect.top) * ratio;
+      const layout = plan.cargo_layout;
+      const visible = layout.placements.filter((item) => item.trip === trip);
+      let best = -1;
+      let bestDepth = -Infinity;
+      visible.forEach((item, index) => {
+        const corners = boxCorners(item).map((point) => project(point[0], point[1], point[2], layout));
+        const minX = Math.min(...corners.map((point) => point.x));
+        const maxX = Math.max(...corners.map((point) => point.x));
+        const minY = Math.min(...corners.map((point) => point.y));
+        const maxY = Math.max(...corners.map((point) => point.y));
+        const depth = Math.max(...corners.map((point) => point.depth));
+        if (x >= minX && x <= maxX && y >= minY && y <= maxY && depth > bestDepth) {
+          best = index;
+          bestDepth = depth;
+        }
+      });
+      if (best >= 0) {
+        selected = best;
+        renderList();
+        draw();
+      }
+    }
+
+    function boxCorners(item) {
+      const x = item.x_cm;
+      const y = item.y_cm;
+      const z = item.z_cm;
+      const w = item.width_cm;
+      const h = item.height_cm;
+      const d = item.depth_cm;
+      return [
+        [x, y, z], [x + w, y, z], [x + w, y, z + d], [x, y, z + d],
+        [x, y + h, z], [x + w, y + h, z], [x + w, y + h, z + d], [x, y + h, z + d]
+      ];
+    }
+
+    const presets = document.getElementById("presets");
+    Object.entries(cameras).forEach(([name, camera]) => {
+      const button = document.createElement("button");
+      button.className = "preset";
+      button.textContent = name;
+      button.addEventListener("click", () => {
+        yaw = camera.yaw;
+        pitch = camera.pitch;
+        zoom = camera.zoom;
+        document.querySelectorAll(".preset").forEach((item) => item.classList.remove("active"));
+        button.classList.add("active");
+        draw();
+      });
+      presets.appendChild(button);
+    });
+    const initialCamera = decodeURIComponent(location.hash.replace("#", ""));
+    if (cameras[initialCamera]) {
+      yaw = cameras[initialCamera].yaw;
+      pitch = cameras[initialCamera].pitch;
+      zoom = cameras[initialCamera].zoom;
+      presets.querySelectorAll("button").forEach((button) => {
+        button.classList.toggle("active", button.textContent === initialCamera);
+      });
+    } else {
+      presets.firstChild.classList.add("active");
+    }
+
+    canvas.addEventListener("pointerdown", (event) => {
+      dragging = true;
+      last = { x: event.clientX, y: event.clientY };
+      canvas.classList.add("dragging");
+      canvas.setPointerCapture(event.pointerId);
+    });
+    canvas.addEventListener("pointerup", (event) => {
+      const moved = last && Math.hypot(event.clientX - last.x, event.clientY - last.y) < 4;
+      dragging = false;
+      canvas.classList.remove("dragging");
+      if (moved) hitTest(event);
+    });
+    canvas.addEventListener("pointermove", (event) => {
+      if (!dragging || !last) return;
+      yaw += (event.clientX - last.x) * 0.008;
+      pitch = Math.max(-0.2, Math.min(1.35, pitch + (event.clientY - last.y) * 0.006));
+      last = { x: event.clientX, y: event.clientY };
+      draw();
+    });
+    canvas.addEventListener("wheel", (event) => {
+      event.preventDefault();
+      zoom = Math.max(0.55, Math.min(2.4, zoom * (event.deltaY > 0 ? 1.08 : 0.92)));
+      draw();
+    }, { passive: false });
+
+    document.getElementById("sample").addEventListener("click", loadSample);
+    document.getElementById("analyze").addEventListener("click", analyzePhotos);
+    window.addEventListener("resize", resize);
+    resize();
+    loadSample();
+  </script>
+</body>
+</html>

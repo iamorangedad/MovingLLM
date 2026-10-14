@@ -20,6 +20,9 @@ class BoxSpec(BaseModel):
 class TruckSpec(BaseModel):
     name: str
     capacity_m3: float = Field(gt=0)
+    length_cm: float = Field(gt=0)
+    width_cm: float = Field(gt=0)
+    height_cm: float = Field(gt=0)
     max_item_length_cm: float = Field(gt=0)
     door_width_cm: float = Field(gt=0)
     door_height_cm: float = Field(gt=0)

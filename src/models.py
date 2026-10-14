@@ -54,6 +54,48 @@ class BoxRequirement(BaseModel):
     suggested_contents: list[str] = Field(default_factory=list)
 
 
+class PlacementSide(str, Enum):
+    LEFT = "left"
+    CENTER = "center"
+    RIGHT = "right"
+
+
+class PlacementLevel(str, Enum):
+    BOTTOM = "bottom"
+    MIDDLE = "middle"
+    TOP = "top"
+
+
+class CargoPlacement(BaseModel):
+    name: str
+    kind: str
+    furniture_type: Optional[str] = None
+    trip: int = Field(ge=1)
+    x_cm: float = Field(description="距左壁")
+    y_cm: float = Field(description="距地板")
+    z_cm: float = Field(description="距后部，指向车门")
+    width_cm: float = Field(description="左右方向的尺寸")
+    height_cm: float = Field(description="上下方向的尺寸")
+    depth_cm: float = Field(description="后部到车门方向的尺寸")
+    side: PlacementSide
+    level: PlacementLevel
+    fragile: bool = False
+    note: str
+
+
+class CargoLayout(BaseModel):
+    truck_name: str
+    length_cm: float
+    width_cm: float
+    height_cm: float
+    door_width_cm: float
+    door_height_cm: float
+    trips: int = Field(ge=0)
+    placements: list[CargoPlacement]
+    unplaced: list[str] = Field(default_factory=list)
+    axis_note: str = "x 从左到右，y 从地板向上，z 从车厢后部指向车门"
+
+
 class SpaceEstimation(BaseModel):
     total_volume_cm3: float
     loose_volume_cm3: float
@@ -95,6 +137,7 @@ class MovingPlan(BaseModel):
     space_estimation: SpaceEstimation
     box_requirements: list[BoxRequirement]
     loading_order: list[str]
+    cargo_layout: CargoLayout
     total_cost_estimate: float
     cost_breakdown: CostBreakdown
     estimated_time: str
