@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MovingLLM 两套空间</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #1c1915;
+      --muted: #6b645c;
+      --line: #e4dcd2;
+      --paper: #f6f1ea;
+      --panel: #fffdf9;
+      --accent: #9a5b32;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+      color: var(--ink);
+      background: var(--paper);
+    }
+    header { padding: 28px 24px 8px; }
+    h1 { margin: 0; font-size: 28px; font-weight: 650; }
+    header p { margin: 8px 0 0; color: var(--muted); max-width: 640px; }
+    main {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      padding: 20px 24px 32px;
+    }
+    a.card {
+      display: block;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 22px;
+      text-decoration: none;
+      color: inherit;
+    }
+    a.card:hover { border-color: var(--accent); }
+    h2 { margin: 0 0 8px; font-size: 20px; }
+    p { margin: 0; color: var(--muted); line-height: 1.55; }
+    .extra { margin-top: 18px; font-size: 14px; }
+    .extra a { color: var(--accent); }
+    @media (max-width: 800px) {
+      main { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>搬家的两段空间</h1>
+    <p>装车时按车厢尺寸堆叠。到了新家，按画出来的平面图摆放家具。报价仍然走原来的自动计划。</p>
+  </header>
+  <main>
+    <a class="card" href="/pack">
+      <h2>装车整理</h2>
+      <p>输入长、宽、高，生成一节车厢。用鼠标拖动物体，把它们叠在有支撑的位置上。</p>
+    </a>
+    <a class="card" href="/home">
+      <h2>新家摆放</h2>
+      <p>画出房间的平面图，挤出墙和门，再在地板上模拟家具的位置。</p>
+    </a>
+  </main>
+  <p class="extra" style="padding: 0 24px 28px;">已经算好的装车建议仍可在 <a href="/view">自动三维页面</a> 查看。</p>
+</body>
+</html>
