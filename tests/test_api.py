@@ -106,6 +106,87 @@ def test_view_page_is_served():
     assert "cargo_layout" in response.text
 
 
+def test_manual_spaces_do_not_call_the_model():
+    provider = BlockingProvider()
+    client = _client(provider)
+    studio = client.get("/studio")
+    pack = client.get("/pack")
+    home = client.get("/home")
+    assert studio.status_code == 200
+    assert "装车" in studio.text and "新家" in studio.text
+    assert pack.status_code == 200 and "装车整理" in pack.text
+    assert home.status_code == 200 and "新家摆放" in home.text
+    assert "three.module.js" in pack.text and "three.module.js" in home.text
+
+    cube = {
+        "name": "甲",
+        "furniture_type": "other",
+        "dimensions": {"length": 40, "width": 40, "height": 40},
+        "weight": 50,
+    }
+    arranged = client.post(
+        "/cargo/arrange",
+        json={
+            "furniture_items": [cube, {**cube, "name": "乙"}],
+            "space": {"length_cm": 200, "width_cm": 200, "height_cm": 200},
+        },
+    )
+    assert arranged.status_code == 200
+    layout = arranged.json()
+    lower = next(item for item in layout["placements"] if item["name"] == "甲")
+    upper = next(item for item in layout["placements"] if item["name"] == "乙")
+    moved = client.post(
+        "/cargo/move",
+        json={
+            "layout": layout,
+            "move": {
+                "id": upper["id"],
+                "x_cm": lower["x_cm"],
+                "z_cm": lower["z_cm"],
+                "yaw_quarters": 0,
+            },
+        },
+    )
+    assert moved.status_code == 200
+    stacked = next(item for item in moved.json()["placements"] if item["id"] == upper["id"])
+    assert stacked["y_cm"] == lower["height_cm"]
+
+    rejected = client.post(
+        "/cargo/arrange",
+        json={"furniture_items": [], "space": {"length_cm": 10, "width_cm": 100, "height_cm": 100}},
+    )
+    assert rejected.status_code == 422
+
+    built = client.post(
+        "/home/build",
+        json={
+            "furniture_items": [
+                {
+                    "name": "沙发",
+                    "furniture_type": "sofa",
+                    "dimensions": {"length": 180, "width": 80, "height": 70},
+                    "weight": 30,
+                }
+            ],
+            "floor_plan": {
+                "rooms": [{"name": "客厅", "x_cm": 0, "z_cm": 0, "width_cm": 500, "depth_cm": 400}]
+            },
+        },
+    )
+    assert built.status_code == 200
+    home_layout = built.json()
+    sofa = home_layout["placements"][0]
+    blocked = client.post(
+        "/home/move",
+        json={
+            "layout": home_layout,
+            "move": {"id": sofa["id"], "x_cm": 0, "z_cm": sofa["z_cm"], "yaw_quarters": 0},
+        },
+    )
+    assert blocked.status_code == 422
+    assert provider.image_calls == 0
+
+
 def test_analyze_distance_changes_transport():
     client = _client(RecordingProvider())
     files = [("files", ("room.jpg", b"img", "image/jpeg"))]
