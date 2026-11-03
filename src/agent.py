@@ -1,11 +1,18 @@
 from src.box_calculator import BoxCalculator
+from src.cargo_edit import apply_cargo_move
 from src.config import default_context, get_settings
+from src.home import apply_home_move, arrange_home
 from src.layout import CargoLayoutPlanner
 from src.models import (
+    CargoLayout,
+    CargoSpace,
     CostBreakdown,
+    FloorPlan,
     FurnitureItem,
+    HomeLayout,
     MoveContext,
     MovingPlan,
+    PoseMove,
 )
 from src.provider import MovingLLMProvider, OpenAIProvider
 from src.space_estimator import SpaceEstimator
@@ -93,6 +100,23 @@ class MovingLLMAgent:
             context=context,
             dimensions_confirmed=dimensions_confirmed,
         )
+
+    def arrange_cargo(
+        self, furniture_items: list[FurnitureItem], space: CargoSpace
+    ) -> CargoLayout:
+        boxes = self.box_calculator.calculate_box_requirements(furniture_items)
+        return self.layout_planner.place_in_space(furniture_items, boxes, space)
+
+    def move_cargo(self, layout: CargoLayout, move: PoseMove) -> CargoLayout:
+        return apply_cargo_move(layout, move)
+
+    def build_home(
+        self, furniture_items: list[FurnitureItem], floor_plan: FloorPlan
+    ) -> HomeLayout:
+        return arrange_home(furniture_items, floor_plan, self.settings)
+
+    def move_home(self, layout: HomeLayout, move: PoseMove) -> HomeLayout:
+        return apply_home_move(layout, move)
 
     def get_recommendations(self, plan: MovingPlan) -> str:
         return self.provider.recommend(plan)

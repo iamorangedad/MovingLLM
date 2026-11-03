@@ -3,11 +3,13 @@ from itertools import permutations
 
 from src.cargo import LOAD_FIRST, rides_loose
 from src.config import TruckSpec, get_settings
+from src.errors import LayoutEditError
 from src.models import (
     BoxRequirement,
     BoxSize,
     CargoLayout,
     CargoPlacement,
+    CargoSpace,
     FurnitureItem,
     FurnitureType,
     PlacementLevel,
@@ -86,17 +88,31 @@ class CargoLayoutPlanner:
         )
         pieces = _pieces(furniture_items, box_requirements, self.settings.box_sizes)
         placed, unplaced = _pack(pieces, truck)
-        return CargoLayout(
-            truck_name=truck.name,
-            length_cm=truck.length_cm,
-            width_cm=truck.width_cm,
-            height_cm=truck.height_cm,
-            door_width_cm=truck.door_width_cm,
-            door_height_cm=truck.door_height_cm,
-            trips=max((item.trip for item in placed), default=0),
-            placements=[_placement(item, truck) for item in placed],
-            unplaced=[item.name for item in unplaced],
+        return _cargo_layout(truck, placed, unplaced)
+
+    def place_in_space(
+        self,
+        furniture_items: list[FurnitureItem],
+        box_requirements: list[BoxRequirement],
+        space: CargoSpace,
+    ) -> CargoLayout:
+        limits = self.settings.cargo_space
+        for value in (space.length_cm, space.width_cm, space.height_cm):
+            if value < limits.min_cm or value > limits.max_cm:
+                raise LayoutEditError("车厢尺寸超出配置范围")
+        truck = TruckSpec(
+            name="自定义车厢",
+            capacity_m3=space.length_cm * space.width_cm * space.height_cm / 1_000_000,
+            length_cm=space.length_cm,
+            width_cm=space.width_cm,
+            height_cm=space.height_cm,
+            max_item_length_cm=max(space.length_cm, space.width_cm, space.height_cm),
+            door_width_cm=space.width_cm,
+            door_height_cm=space.height_cm,
         )
+        pieces = _pieces(furniture_items, box_requirements, self.settings.box_sizes)
+        placed, waiting = _pack_trip(pieces, truck, 1)
+        return _cargo_layout(truck, placed, waiting, hold=True)
 
 
 def _pieces(furniture_items, box_requirements, box_sizes) -> list[_Piece]:
@@ -322,24 +338,65 @@ def _point_inside(x, y, z, placed) -> bool:
     return False
 
 
-def _placement(item: _Placed, truck: TruckSpec) -> CargoPlacement:
+def _cargo_layout(truck, placed, waiting, hold=False) -> CargoLayout:
+    placements = [
+        _placement(item, truck, f"{item.trip}-{index}")
+        for index, item in enumerate(placed)
+    ]
+    held = []
+    if hold:
+        for index, piece in enumerate(waiting):
+            held.append(_held_placement(piece, truck, f"held-{index}"))
+    return CargoLayout(
+        truck_name=truck.name,
+        length_cm=truck.length_cm,
+        width_cm=truck.width_cm,
+        height_cm=truck.height_cm,
+        door_width_cm=truck.door_width_cm,
+        door_height_cm=truck.door_height_cm,
+        trips=max((item.trip for item in placed), default=0),
+        placements=placements,
+        held=held,
+        unplaced=[item.name for item in waiting],
+    )
+
+
+def pose_note(
+    trip, x, y, z, width, cargo_width, cargo_height, fragile, kind
+) -> tuple[PlacementSide, PlacementLevel, str]:
     side = _band(
-        item.x + item.width / 2,
-        truck.width_cm,
+        x + width / 2,
+        cargo_width,
         PlacementSide.LEFT,
         PlacementSide.CENTER,
         PlacementSide.RIGHT,
     )
-    level = _level(item.y, truck.height_cm)
+    level = _level(y, cargo_height)
     note = (
-        f"第{item.trip}趟：放在车厢{SIDE_TEXT[side]}{LEVEL_TEXT[level]}，"
-        f"距后部 {item.z:.0f} cm，距左壁 {item.x:.0f} cm，距地板 {item.y:.0f} cm"
+        f"第{trip}趟：放在车厢{SIDE_TEXT[side]}{LEVEL_TEXT[level]}，"
+        f"距后部 {z:.0f} cm，距左壁 {x:.0f} cm，距地板 {y:.0f} cm"
     )
-    if item.piece.fragile:
+    if fragile:
         note += "；易碎，不要在上面压重物"
-    if item.piece.kind == "box":
+    if kind == "box":
         note += "；这是纸箱"
+    return side, level, note
+
+
+def _placement(item: _Placed, truck: TruckSpec, placement_id: str) -> CargoPlacement:
+    side, level, note = pose_note(
+        item.trip,
+        item.x,
+        item.y,
+        item.z,
+        item.width,
+        truck.width_cm,
+        truck.height_cm,
+        item.piece.fragile,
+        item.piece.kind,
+    )
     return CargoPlacement(
+        id=placement_id,
         name=item.piece.name,
         kind=item.piece.kind,
         furniture_type=item.piece.furniture_type,
@@ -350,11 +407,50 @@ def _placement(item: _Placed, truck: TruckSpec) -> CargoPlacement:
         width_cm=round(item.width, 2),
         height_cm=round(item.height, 2),
         depth_cm=round(item.depth, 2),
+        rest_width_cm=round(item.width, 2),
+        rest_depth_cm=round(item.depth, 2),
+        yaw_quarters=0,
         side=side,
         level=level,
         fragile=item.piece.fragile,
         note=note,
     )
+
+
+def _held_placement(piece: _Piece, truck: TruckSpec, placement_id: str) -> CargoPlacement:
+    width, height, depth = _preferred_footprint(piece, truck)
+    return CargoPlacement(
+        id=placement_id,
+        name=piece.name,
+        kind=piece.kind,
+        furniture_type=piece.furniture_type,
+        trip=1,
+        x_cm=0,
+        y_cm=0,
+        z_cm=0,
+        width_cm=round(width, 2),
+        height_cm=round(height, 2),
+        depth_cm=round(depth, 2),
+        rest_width_cm=round(width, 2),
+        rest_depth_cm=round(depth, 2),
+        side=PlacementSide.LEFT,
+        level=PlacementLevel.BOTTOM,
+        fragile=piece.fragile,
+        note="尚未放入车厢",
+    )
+
+
+def _preferred_footprint(piece: _Piece, truck: TruckSpec) -> tuple[float, float, float]:
+    options = sorted(_orientations(piece))
+    for _penalty, depth, across, vertical in options:
+        if (
+            across <= truck.width_cm
+            and vertical <= truck.height_cm
+            and depth <= truck.length_cm
+        ):
+            return across, vertical, depth
+    _penalty, depth, across, vertical = options[0]
+    return across, vertical, depth
 
 
 def _level(bottom, height):

@@ -35,11 +35,14 @@ python main.py furniture.jpg --recommend
 python api_server.py
 ```
 
-浏览器打开 `http://localhost:8000/view`。页面把计划画成车厢：后部先装，地板是底层，左壁和右壁用颜色区分。可以拖动旋转，或切换车门、顶视、左侧。
+浏览器打开 `http://localhost:8000/studio`，从这里进入两套空间。
 
-「看示例」使用内置家具调用 `POST /recalculate`，不访问模型。上传照片则调用 `POST /analyze`。
+- `GET /pack`：输入车厢长、宽、高，拖动物体堆叠。落点由 `POST /cargo/arrange` 和 `POST /cargo/move` 决定。
+- `GET /home`：在平面图上画出房间，再在挤出的空间里摆家具。对应 `POST /home/build` 和 `POST /home/move`。
+- `GET /view`：自动三维装车页面。后部先装，地板是底层，左壁和右壁用颜色区分。
 
-- `GET /view`：三维装车页面
+「看示例」使用内置家具调用 `POST /recalculate`，不访问模型。上传照片则调用 `POST /analyze`。手动装车和新家摆放也不调用模型，并且不改变报价。
+
 - `POST /analyze`：上传图片，返回 `MovingPlan`，其中 `cargo_layout` 是坐标
 - `POST /recommend`：上传图片，返回计划和文字建议
 - `POST /recalculate`：提交确认后的家具清单和行程，不调用模型

@@ -67,10 +67,14 @@ class PlacementLevel(str, Enum):
 
 
 class CargoPlacement(BaseModel):
+    id: str = ""
     name: str
     kind: str
     furniture_type: Optional[str] = None
     trip: int = Field(ge=1)
+    rest_width_cm: Optional[float] = None
+    rest_depth_cm: Optional[float] = None
+    yaw_quarters: int = 0
     x_cm: float = Field(description="距左壁")
     y_cm: float = Field(description="距地板")
     z_cm: float = Field(description="距后部，指向车门")
@@ -92,8 +96,98 @@ class CargoLayout(BaseModel):
     door_height_cm: float
     trips: int = Field(ge=0)
     placements: list[CargoPlacement]
+    held: list[CargoPlacement] = Field(default_factory=list)
     unplaced: list[str] = Field(default_factory=list)
     axis_note: str = "x 从左到右，y 从地板向上，z 从车厢后部指向车门"
+
+
+class CargoSpace(BaseModel):
+    length_cm: float = Field(gt=0)
+    width_cm: float = Field(gt=0)
+    height_cm: float = Field(gt=0)
+
+
+class PoseMove(BaseModel):
+    id: str
+    x_cm: float
+    z_cm: float
+    yaw_quarters: int = 0
+
+
+class CargoArrangeRequest(BaseModel):
+    furniture_items: list[FurnitureItem]
+    space: CargoSpace
+
+
+class CargoMoveRequest(BaseModel):
+    layout: CargoLayout
+    move: PoseMove
+
+
+class RoomRect(BaseModel):
+    name: str
+    x_cm: float = Field(ge=0)
+    z_cm: float = Field(ge=0)
+    width_cm: float = Field(gt=0)
+    depth_cm: float = Field(gt=0)
+
+
+class FloorPlan(BaseModel):
+    rooms: list[RoomRect]
+    wall_height_cm: Optional[float] = Field(default=None, gt=0)
+
+
+class ShellSolid(BaseModel):
+    name: str
+    kind: str
+    x_cm: float
+    y_cm: float
+    z_cm: float
+    width_cm: float
+    height_cm: float
+    depth_cm: float
+
+
+class HomeShell(BaseModel):
+    wall_height_cm: float
+    wall_thickness_cm: float
+    rooms: list[RoomRect]
+    interiors: list[RoomRect]
+    solids: list[ShellSolid]
+
+
+class HomePlacement(BaseModel):
+    id: str
+    name: str
+    furniture_type: str
+    x_cm: float
+    y_cm: float = 0
+    z_cm: float
+    width_cm: float
+    height_cm: float
+    depth_cm: float
+    rest_width_cm: float
+    rest_depth_cm: float
+    yaw_quarters: int = 0
+    room_name: Optional[str] = None
+    note: str = ""
+
+
+class HomeLayout(BaseModel):
+    shell: HomeShell
+    placements: list[HomePlacement]
+    held: list[HomePlacement] = Field(default_factory=list)
+    unplaced: list[str] = Field(default_factory=list)
+
+
+class HomeBuildRequest(BaseModel):
+    furniture_items: list[FurnitureItem]
+    floor_plan: FloorPlan
+
+
+class HomeMoveRequest(BaseModel):
+    layout: HomeLayout
+    move: PoseMove
 
 
 class SpaceEstimation(BaseModel):

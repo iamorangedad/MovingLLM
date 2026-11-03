@@ -4,15 +4,29 @@ from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 
 from src.agent import MovingLLMAgent
 from src.config import default_context, get_settings
-from src.errors import ConfigurationError, VisionParseError
-from src.models import MoveContext, MovingPlan, RecalculateRequest, RecommendResponse
+from src.errors import ConfigurationError, LayoutEditError, VisionParseError
+from src.models import (
+    CargoArrangeRequest,
+    CargoMoveRequest,
+    HomeBuildRequest,
+    HomeMoveRequest,
+    MoveContext,
+    MovingPlan,
+    RecalculateRequest,
+    RecommendResponse,
+)
 
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
-VIEW_PAGE = Path(__file__).resolve().parent / "web" / "viewer.html"
+WEB_DIR = Path(__file__).resolve().parent / "web"
+VIEW_PAGE = WEB_DIR / "viewer.html"
+PACK_PAGE = WEB_DIR / "pack.html"
+HOME_PAGE = WEB_DIR / "home.html"
+STUDIO_PAGE = WEB_DIR / "studio.html"
 
 
 def create_app(agent: MovingLLMAgent | None = None) -> FastAPI:
@@ -25,16 +39,51 @@ def create_app(agent: MovingLLMAgent | None = None) -> FastAPI:
             "message": "MovingLLM API",
             "version": "1.1.0",
             "endpoints": {
-                "/view": "GET 三维装车页面",
+                "/studio": "GET 选择装车或新家",
+                "/view": "GET 自动三维装车页面",
+                "/pack": "GET 按尺寸装车并手动堆叠",
+                "/home": "GET 绘制平面图并摆放家具",
                 "/analyze": "POST 上传图片并生成搬家计划",
                 "/recommend": "POST 上传图片并生成文字建议",
                 "/recalculate": "POST 用确认后的家具清单重算，不调用模型",
+                "/cargo/arrange": "POST 按车厢尺寸生成可编辑装车布局",
+                "/cargo/move": "POST 校验一次装车移动",
+                "/home/build": "POST 按平面图生成新家空间",
+                "/home/move": "POST 校验一次新家移动",
             },
         }
+
+    @app.get("/studio")
+    def studio():
+        return FileResponse(STUDIO_PAGE)
 
     @app.get("/view")
     def cargo_view():
         return FileResponse(VIEW_PAGE)
+
+    @app.get("/pack")
+    def pack_view():
+        return FileResponse(PACK_PAGE)
+
+    @app.get("/home")
+    def home_view():
+        return FileResponse(HOME_PAGE)
+
+    @app.post("/cargo/arrange")
+    def arrange_cargo(body: CargoArrangeRequest):
+        return _edit(lambda: resolved.arrange_cargo(body.furniture_items, body.space))
+
+    @app.post("/cargo/move")
+    def move_cargo(body: CargoMoveRequest):
+        return _edit(lambda: resolved.move_cargo(body.layout, body.move))
+
+    @app.post("/home/build")
+    def build_home(body: HomeBuildRequest):
+        return _edit(lambda: resolved.build_home(body.furniture_items, body.floor_plan))
+
+    @app.post("/home/move")
+    def move_home(body: HomeMoveRequest):
+        return _edit(lambda: resolved.move_home(body.layout, body.move))
 
     @app.post("/analyze", response_model=MovingPlan)
     async def analyze_moving(
@@ -89,6 +138,7 @@ def create_app(agent: MovingLLMAgent | None = None) -> FastAPI:
             body.furniture_items, body.context, confirmed=True
         )
 
+    app.mount("/assets", StaticFiles(directory=WEB_DIR), name="assets")
     return app
 
 
@@ -143,6 +193,13 @@ def _run_plan(callback):
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except ConfigurationError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+def _edit(callback):
+    try:
+        return callback()
+    except LayoutEditError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 app = create_app()

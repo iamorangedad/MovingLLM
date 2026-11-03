@@ -30,6 +30,20 @@ packing:
   box_fill_factor: 0.65
   stacking_factor: 0.85
 
+cargo_space:
+  min_cm: 40
+  max_cm: 2000
+  default_length_cm: 420
+  default_width_cm: 200
+  default_height_cm: 200
+
+home:
+  wall_height_cm: 280
+  wall_thickness_cm: 12
+  door_width_cm: 90
+  min_room_cm: 80
+  max_room_cm: 3000
+
 trucks:
   - name: 小型厢式车
     capacity_m3: 3
