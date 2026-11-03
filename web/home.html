@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MovingLLM 新家摆放</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #1c1915;
+      --muted: #6b645c;
+      --line: #e4dcd2;
+      --paper: #f6f1ea;
+      --panel: #fffdf9;
+      --accent: #9a5b32;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+      color: var(--ink);
+      background: var(--paper);
+    }
+    header, .links { display: flex; justify-content: space-between; gap: 16px; align-items: flex-end; }
+    header { padding: 20px 24px 12px; }
+    h1 { margin: 0; font-size: 22px; font-weight: 650; }
+    header p { margin: 6px 0 0; color: var(--muted); font-size: 14px; max-width: 720px; }
+    .links { align-items: center; gap: 12px; }
+    .links a { color: var(--accent); text-decoration: none; font-size: 14px; }
+    .layout {
+      display: grid;
+      grid-template-columns: 360px 1fr;
+      gap: 16px;
+      padding: 0 24px 24px;
+    }
+    .panel, .stage { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; }
+    .panel { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+    label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+    input[type="text"] {
+      width: 100%; font: inherit; padding: 8px 10px;
+      border: 1px solid var(--line); border-radius: 10px;
+    }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; }
+    button {
+      font: inherit; border: 0; border-radius: 999px; padding: 8px 12px;
+      background: var(--ink); color: white; cursor: pointer;
+    }
+    button.secondary { background: #efe8df; color: var(--ink); }
+    button:disabled { opacity: 0.5; cursor: wait; }
+    .status { min-height: 20px; font-size: 13px; color: var(--accent); }
+    .plan-wrap { height: 240px; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: #fbf8f4; }
+    #plan { width: 100%; height: 100%; display: block; cursor: crosshair; touch-action: none; }
+    ul.items { list-style: none; margin: 0; padding: 0; overflow: auto; max-height: 220px; }
+    ul.items li { border-top: 1px solid var(--line); padding: 8px 4px; cursor: pointer; font-size: 13px; display: flex; justify-content: space-between; gap: 8px; }
+    ul.items li.active { background: #f3ebe3; border-radius: 8px; }
+    ul.items small, .hint { color: var(--muted); }
+    h2 { margin: 4px 0 0; font-size: 14px; }
+    .stage { position: relative; height: calc(100vh - 140px); min-height: 560px; overflow: hidden; }
+    #scene { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
+    #scene.dragging { cursor: grabbing; }
+    .hud { position: absolute; left: 16px; right: 16px; bottom: 14px; color: #6b645c; font-size: 12px; pointer-events: none; }
+    @media (max-width: 860px) {
+      .layout { grid-template-columns: 1fr; }
+      .stage { order: -1; height: 62vh; min-height: 420px; }
+      header { flex-direction: column; align-items: flex-start; }
+    }
+  </style>
+  <script type="importmap">
+    { "imports": { "three": "/assets/vendor/three.module.js" } }
+  </script>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>新家摆放</h1>
+      <p>在平面图上拖出房间，生成带墙和门的三维空间，再把家具放在地板上。</p>
+    </div>
+    <nav class="links">
+      <a href="/studio">入口</a>
+      <a href="/pack">装车整理</a>
+      <a href="/view">自动报价</a>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="panel">
+      <div>
+        <label for="room-name">房间名称</label>
+        <input id="room-name" type="text" placeholder="留空则按房间 1、房间 2 命名" />
+      </div>
+      <div class="plan-wrap"><canvas id="plan"></canvas></div>
+      <p class="hint">按住拖出矩形。每 10 cm 对齐，边长至少 80 cm。边可以贴在一起，面积不能重叠。</p>
+      <div class="row">
+        <button id="sample" class="secondary" type="button">示例户型</button>
+        <button id="build" type="button">生成新家</button>
+        <button id="rotate" class="secondary" type="button">旋转 90°</button>
+      </div>
+      <div class="status" id="status">先画房间，再生成三维空间。</div>
+      <h2>房间</h2>
+      <ul class="items" id="rooms"></ul>
+      <h2>已摆放</h2>
+      <ul class="items" id="placed"></ul>
+      <h2>待摆</h2>
+      <ul class="items" id="held"></ul>
+    </aside>
+    <section class="stage">
+      <canvas id="scene"></canvas>
+      <div class="hud">家具只放在地板上。拖进房间后松手，服务端会检查墙和重叠。按 R 旋转。</div>
+    </section>
+  </div>
+  <script type="module">
+    import { createSpace } from "/assets/space.js";
+
+    const furniture = [
+      { name: "沙发", furniture_type: "sofa", dimensions: { length: 180, width: 80, height: 70 }, weight: 30, quantity: 1 },
+      { name: "床", furniture_type: "bed", dimensions: { length: 200, width: 140, height: 40 }, weight: 40, quantity: 1 },
+      { name: "衣柜", furniture_type: "wardrobe", dimensions: { length: 180, width: 60, height: 200 }, weight: 70, quantity: 1 },
+      { name: "书桌", furniture_type: "desk", dimensions: { length: 120, width: 60, height: 75 }, weight: 25, quantity: 1 }
+    ];
+    const WORLD = 1400;
+    const SNAP = 10;
+    const MIN_ROOM = 80;
+
+    let rooms = [];
+    let draft = null;
+    let layout = null;
+    let busy = false;
+    const status = document.getElementById("status");
+    const plan = document.getElementById("plan");
+    const planContext = plan.getContext("2d");
+    const space = createSpace(document.getElementById("scene"), {
+      onCommit: (move) => commit(move),
+      onSelect: (item) => mark(item && item.id)
+    });
+
+    function useSample() {
+      rooms = [
+        { name: "客厅", x_cm: 0, z_cm: 0, width_cm: 500, depth_cm: 400 },
+        { name: "卧室", x_cm: 500, z_cm: 0, width_cm: 360, depth_cm: 400 }
+      ];
+      paintPlan();
+      renderRooms();
+      status.textContent = "已放入客厅和卧室。可以生成新家，也可以再画一间。";
+    }
+
+    function metrics() {
+      const rect = plan.getBoundingClientRect();
+      const pad = 16;
+      const scale = Math.min((rect.width - pad * 2) / WORLD, (rect.height - pad * 2) / WORLD);
+      return { pad, scale, width: rect.width, height: rect.height };
+    }
+
+    function resizePlan() {
+      const rect = plan.getBoundingClientRect();
+      const ratio = window.devicePixelRatio || 1;
+      plan.width = Math.max(1, Math.round(rect.width * ratio));
+      plan.height = Math.max(1, Math.round(rect.height * ratio));
+      paintPlan();
+    }
+
+    function toWorld(event) {
+      const view = metrics();
+      const rect = plan.getBoundingClientRect();
+      const x = (event.clientX - rect.left - view.pad) / view.scale;
+      const z = (event.clientY - rect.top - view.pad) / view.scale;
+      return { x: snap(x), z: snap(z) };
+    }
+
+    function snap(value) {
+      return Math.max(0, Math.round(value / SNAP) * SNAP);
+    }
+
+    function paintPlan() {
+      const view = metrics();
+      const ratio = plan.width / Math.max(view.width, 1);
+      const context = planContext;
+      context.setTransform(ratio, 0, 0, ratio, 0, 0);
+      context.clearRect(0, 0, view.width, view.height);
+      context.fillStyle = "#fbf8f4";
+      context.fillRect(0, 0, view.width, view.height);
+      context.save();
+      context.translate(view.pad, view.pad);
+      context.strokeStyle = "#efe6dc";
+      context.lineWidth = 1;
+      for (let value = 0; value <= WORLD; value += 100) {
+        context.beginPath();
+        context.moveTo(value * view.scale, 0);
+        context.lineTo(value * view.scale, WORLD * view.scale);
+        context.moveTo(0, value * view.scale);
+        context.lineTo(WORLD * view.scale, value * view.scale);
+        context.stroke();
+      }
+      for (const room of rooms) drawRoom(context, view.scale, room, "#f3e4d4", "#9a5b32");
+      if (draft) {
+        const room = rectangle(draft.start, draft.end);
+        const clash = room && overlaps(room, null);
+        drawRoom(context, view.scale, room, clash ? "#f8d6d2" : "#e7f0e4", clash ? "#a33b32" : "#3f6f4a");
+      }
+      context.restore();
+    }
+
+    function drawRoom(context, scale, room, fill, stroke) {
+      if (!room) return;
+      context.fillStyle = fill;
+      context.strokeStyle = stroke;
+      context.lineWidth = 2;
+      context.fillRect(room.x_cm * scale, room.z_cm * scale, room.width_cm * scale, room.depth_cm * scale);
+      context.strokeRect(room.x_cm * scale, room.z_cm * scale, room.width_cm * scale, room.depth_cm * scale);
+      if (!room.name) return;
+      context.fillStyle = "#1c1915";
+      context.font = "12px sans-serif";
+      context.fillText(room.name, room.x_cm * scale + 6, room.z_cm * scale + 16);
+    }
+
+    function rectangle(start, end) {
+      const x = Math.min(start.x, end.x);
+      const z = Math.min(start.z, end.z);
+      const width = Math.abs(end.x - start.x);
+      const depth = Math.abs(end.z - start.z);
+      if (width < SNAP || depth < SNAP) return null;
+      return { x_cm: x, z_cm: z, width_cm: width, depth_cm: depth };
+    }
+
+    function overlaps(room, ignore) {
+      return rooms.some((other) => {
+        if (other === ignore) return false;
+        return room.x_cm < other.x_cm + other.width_cm
+          && room.x_cm + room.width_cm > other.x_cm
+          && room.z_cm < other.z_cm + other.depth_cm
+          && room.z_cm + room.depth_cm > other.z_cm;
+      });
+    }
+
+    function renderRooms() {
+      const list = document.getElementById("rooms");
+      list.innerHTML = "";
+      if (!rooms.length) {
+        list.innerHTML = "<li><span>还没有房间</span></li>";
+        return;
+      }
+      rooms.forEach((room, index) => {
+        const row = document.createElement("li");
+        row.innerHTML = `<span><strong>${room.name}</strong><small> ${room.width_cm}×${room.depth_cm} cm</small></span>`;
+        const remove = document.createElement("button");
+        remove.className = "secondary";
+        remove.type = "button";
+        remove.textContent = "删除";
+        remove.addEventListener("click", () => {
+          rooms.splice(index, 1);
+          paintPlan();
+          renderRooms();
+        });
+        row.appendChild(remove);
+        list.appendChild(row);
+      });
+    }
+
+    plan.addEventListener("pointerdown", (event) => {
+      plan.setPointerCapture(event.pointerId);
+      const point = toWorld(event);
+      draft = { start: point, end: point };
+      paintPlan();
+    });
+    plan.addEventListener("pointermove", (event) => {
+      if (!draft) return;
+      draft.end = toWorld(event);
+      paintPlan();
+    });
+    plan.addEventListener("pointerup", () => {
+      if (!draft) return;
+      const room = rectangle(draft.start, draft.end);
+      draft = null;
+      if (!room || room.width_cm < MIN_ROOM || room.depth_cm < MIN_ROOM) {
+        status.textContent = "房间的宽和深至少 80 cm。";
+        paintPlan();
+        return;
+      }
+      if (overlaps(room, null)) {
+        status.textContent = "房间重叠。边贴边可以，面积不能叠在一起。";
+        paintPlan();
+        return;
+      }
+      const typed = document.getElementById("room-name").value.trim();
+      const name = typed || `房间 ${rooms.length + 1}`;
+      if (rooms.some((item) => item.name === name)) {
+        status.textContent = "房间名称不能重复。";
+        paintPlan();
+        return;
+      }
+      rooms.push({ name, ...room });
+      document.getElementById("room-name").value = "";
+      status.textContent = `已画出${name}。可以继续画，或生成新家。`;
+      paintPlan();
+      renderRooms();
+    });
+
+    async function build() {
+      if (!rooms.length) {
+        status.textContent = "至少画一间房间。";
+        return;
+      }
+      await run("正在挤出墙体", async () => {
+        const response = await fetch("/home/build", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ furniture_items: furniture, floor_plan: { rooms } })
+        });
+        const body = await response.json();
+        if (!response.ok) throw new Error(errorText(body));
+        apply(body);
+        status.textContent = body.held.length
+          ? `空间已生成。还有 ${body.held.length} 件待摆。`
+          : "空间已生成。把家具拖到要放的位置。";
+      });
+    }
+
+    async function commit(move) {
+      if (!layout || busy) {
+        if (layout) space.showHome(layout);
+        return;
+      }
+      const held = (layout.held || []).some((item) => item.id === move.id);
+      if (move.intent === "rotate" && held) {
+        status.textContent = "先把这件拖进房间，再旋转。";
+        space.showHome(layout);
+        return;
+      }
+      await run("正在核对落点", async () => {
+        const response = await fetch("/home/move", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            layout,
+            move: {
+              id: move.id,
+              x_cm: move.x_cm,
+              z_cm: move.z_cm,
+              yaw_quarters: move.yaw_quarters
+            }
+          })
+        });
+        const body = await response.json();
+        if (!response.ok) {
+          space.showHome(layout);
+          throw new Error(errorText(body));
+        }
+        apply(body);
+        const item = [...body.placements, ...body.held].find((piece) => piece.id === move.id);
+        status.textContent = item && item.note ? item.note : "已更新位置。";
+        mark(move.id);
+      });
+    }
+
+    function apply(next) {
+      layout = next;
+      space.showHome(layout);
+      fill(document.getElementById("placed"), layout.placements, "还没有放进房间的家具");
+      fill(document.getElementById("held"), layout.held, "没有待摆家具");
+    }
+
+    function fill(list, items, empty) {
+      list.innerHTML = "";
+      if (!items.length) {
+        list.innerHTML = `<li><span>${empty}</span></li>`;
+        return;
+      }
+      for (const item of items) {
+        const row = document.createElement("li");
+        row.dataset.id = item.id;
+        const where = item.room_name ? `${item.room_name} · 离地 ${Math.round(item.y_cm)} cm` : "尚未放入房间";
+        row.innerHTML = `<span><strong>${item.name}</strong><small> ${where}</small></span>`;
+        row.addEventListener("click", () => {
+          space.select(item.id);
+          mark(item.id);
+        });
+        list.appendChild(row);
+      }
+    }
+
+    function mark(id) {
+      document.querySelectorAll("#placed li, #held li").forEach((row) => {
+        row.classList.toggle("active", row.dataset.id === id);
+      });
+    }
+
+    async function run(label, action) {
+      busy = true;
+      document.getElementById("build").disabled = true;
+      status.textContent = label;
+      try {
+        await action();
+      } catch (error) {
+        status.textContent = error.message || "没有完成这次操作";
+      } finally {
+        busy = false;
+        document.getElementById("build").disabled = false;
+      }
+    }
+
+    function errorText(body) {
+      if (!body) return "没有完成这次操作";
+      if (typeof body.detail === "string") return body.detail;
+      if (Array.isArray(body.detail)) return body.detail.map((item) => item.msg).join("；");
+      return "没有完成这次操作";
+    }
+
+    document.getElementById("sample").addEventListener("click", useSample);
+    document.getElementById("build").addEventListener("click", build);
+    document.getElementById("rotate").addEventListener("click", () => {
+      const item = space.selectedItem();
+      if (!item) {
+        status.textContent = "先选中一件家具。";
+        return;
+      }
+      commit({
+        id: item.id,
+        x_cm: item.x_cm,
+        z_cm: item.z_cm,
+        yaw_quarters: ((item.yaw_quarters || 0) + 1) % 4,
+        intent: "rotate"
+      });
+    });
+    new ResizeObserver(resizePlan).observe(plan.parentElement);
+    resizePlan();
+    renderRooms();
+  </script>
+</body>
+</html>
