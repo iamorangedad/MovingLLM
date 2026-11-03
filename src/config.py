@@ -50,6 +50,22 @@ class CostConfig(BaseModel):
     floor_surcharge: float = Field(ge=0)
 
 
+class CargoSpaceConfig(BaseModel):
+    min_cm: float = Field(gt=0)
+    max_cm: float = Field(gt=0)
+    default_length_cm: float = Field(gt=0)
+    default_width_cm: float = Field(gt=0)
+    default_height_cm: float = Field(gt=0)
+
+
+class HomeConfig(BaseModel):
+    wall_height_cm: float = Field(gt=0)
+    wall_thickness_cm: float = Field(gt=0)
+    door_width_cm: float = Field(gt=0)
+    min_room_cm: float = Field(gt=0)
+    max_room_cm: float = Field(gt=0)
+
+
 class TimeConfig(BaseModel):
     minutes_per_item: float = Field(ge=0)
     minutes_per_m3: float = Field(ge=0)
@@ -63,6 +79,8 @@ class Settings(BaseModel):
     box_sizes: dict[BoxSize, BoxSpec]
     packing: PackingConfig
     trucks: list[TruckSpec]
+    cargo_space: CargoSpaceConfig
+    home: HomeConfig
     cost: CostConfig
     time: TimeConfig
     move_defaults: MoveContext
@@ -88,6 +106,8 @@ def load_settings(path: Path | None = None) -> Settings:
         box_sizes=box_sizes,
         packing=PackingConfig.model_validate(raw["packing"]),
         trucks=[TruckSpec.model_validate(item) for item in raw["trucks"]],
+        cargo_space=CargoSpaceConfig.model_validate(raw["cargo_space"]),
+        home=HomeConfig.model_validate(raw["home"]),
         cost=CostConfig.model_validate(raw["cost"]),
         time=TimeConfig.model_validate(raw["time"]),
         move_defaults=MoveContext.model_validate(raw["move_defaults"]),
