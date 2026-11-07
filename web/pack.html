@@ -179,25 +179,28 @@
       onCommit: (move) => commit(move),
       onSelect: (item) => mark(item && item.id)
     });
-
-    async function build() {
-      const spaceSize = {
-        length_cm: Number(document.getElementById("length").value),
-        width_cm: Number(document.getElementById("width").value),
-        height_cm: Number(document.getElementById("height").value)
+    function readSpaceSize() {
+      const read = (id, label) => {
+        const value = Number(document.getElementById(id).value);
+        if (!Number.isFinite(value) || value < 40 || value > 2000) {
+          throw new Error(`${label}必须在 40～2000 cm 之间`);
+        }
+        return value;
       };
-      await run("正在放入示例家具", async () => {
-        const response = await fetch("/cargo/arrange", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ furniture_items: sampleItems, space: spaceSize })
-        });
-        const body = await response.json();
-        if (!response.ok) throw new Error(errorText(body));
-        apply(body);
-        status.textContent = body.held.length
-          ? `已生成车厢。还有 ${body.held.length} 件待装，拖进车厢即可。`
-          : "已生成车厢。拖动物体可以重新堆叠。";
+      return {
+        length_cm: read("length", "车厢长度"),
+        width_cm: read("width", "车厢宽度"),
+        height_cm: read("height", "车厢高度")
+      };
+    }
+    async function build() {
+      if (busy) return;
+      await run("正在重新整理物品", async () => {
+        if (!furnitureItems.length) {
+          throw new Error("请先添加物品，或载入示例");
+        }
+        await arrangeAndApply(furnitureItems, readSpaceSize());
+        status.textContent = "已重新整理，物品位置可能发生变化。";
       });
     }
 
@@ -323,7 +326,7 @@
         intent: "rotate"
       });
     });
-    build();
+    status.textContent = "请先添加物品，或载入示例。";
   </script>
 </body>
 </html>
