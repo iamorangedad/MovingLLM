@@ -242,7 +242,21 @@
       fill(document.getElementById("placed"), layout.placements, "车厢里还没有物品");
       fill(document.getElementById("held"), layout.held, "没有待装物品");
     }
-
+    async function arrangeAndApply(candidate, spaceSize) {
+      const response = await fetch("/cargo/arrange", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          furniture_items: candidate.map(toApiItem),
+          space: spaceSize
+        })
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(errorText(body));
+      furnitureItems = candidate;
+      apply(body);
+      renderFurnitureList();
+    }
     function fill(list, items, empty) {
       list.innerHTML = "";
       if (!items.length) {
